@@ -95,7 +95,18 @@ class _SecureDetailsFormScreenState extends State<SecureDetailsFormScreen> {
       );
 
       await dependencies.recentFileStore.saveSecureDetail(detail);
-      await dependencies.firebaseFileService.saveSecureDetail(detail);
+      try {
+        await dependencies.googleSheetsService.appendSecureDetail(detail);
+      } catch (sheetsError) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Saved in app, but Google Sheets sync failed: $sheetsError',
+            ),
+          ),
+        );
+      }
       if (!mounted) return;
       Navigator.of(context).pop(detail);
     } catch (error) {

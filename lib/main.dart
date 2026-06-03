@@ -1,15 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
 
-import 'firebase_options.dart';
 import 'models/app_config.dart';
 import 'screens/app_lock_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/app_config_service.dart';
 import 'services/auth_service.dart';
 import 'services/drive_service.dart';
-import 'services/firebase_file_service.dart';
 import 'services/file_import_service.dart';
+import 'services/google_sheets_service.dart';
 import 'services/recent_file_store.dart';
 import 'widgets/app_logo.dart';
 
@@ -19,15 +17,20 @@ Future<void> main() async {
 }
 
 Future<AppDependencies> _loadDependencies() async {
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
   final config = await AppConfigService.load();
   final recentFileStore = RecentFileStore();
   await recentFileStore.init();
 
   final authService = AuthService();
-  final firebaseFileService = FirebaseFileService(config: config.firebase);
-  await firebaseFileService.ensureSignedIn();
+  await authService.initialize(
+    clientId: config.google.clientId,
+    serverClientId: config.google.serverClientId,
+  );
+  final googleSheetsService = GoogleSheetsService(
+    config: config.googleSheets,
+    authService: authService,
+    recentFileStore: recentFileStore,
+  );
 
   return AppDependencies(
     config: config,
@@ -36,9 +39,8 @@ Future<AppDependencies> _loadDependencies() async {
     fileImportService: FileImportService(
       config: config,
       recentFileStore: recentFileStore,
-      firebaseFileService: firebaseFileService,
     ),
-    firebaseFileService: firebaseFileService,
+    googleSheetsService: googleSheetsService,
     recentFileStore: recentFileStore,
   );
 }
@@ -257,7 +259,7 @@ class AppDependencies {
     required this.authService,
     required this.driveService,
     required this.fileImportService,
-    required this.firebaseFileService,
+    required this.googleSheetsService,
     required this.recentFileStore,
   });
 
@@ -265,7 +267,7 @@ class AppDependencies {
   final AuthService authService;
   final DriveService driveService;
   final FileImportService fileImportService;
-  final FirebaseFileService firebaseFileService;
+  final GoogleSheetsService googleSheetsService;
   final RecentFileStore recentFileStore;
 }
 

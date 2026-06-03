@@ -7,8 +7,8 @@ class AppConfig {
     this.screens = const ScreenConfig(),
     this.sharing = const SharingConfig(),
     this.google = const GoogleConfig(),
+    this.googleSheets = const GoogleSheetsConfig(),
     this.driveFolder = const DriveFolderConfig(),
-    this.firebase = const FirebaseDatabaseConfig(),
     this.allowedMimeTypes = const <String>[],
   });
 
@@ -19,8 +19,8 @@ class AppConfig {
   final ScreenConfig screens;
   final SharingConfig sharing;
   final GoogleConfig google;
+  final GoogleSheetsConfig googleSheets;
   final DriveFolderConfig driveFolder;
-  final FirebaseDatabaseConfig firebase;
   final List<String> allowedMimeTypes;
 
   factory AppConfig.fromJson(Map<String, dynamic> json) {
@@ -32,11 +32,11 @@ class AppConfig {
       screens: ScreenConfig.fromJson(json['screens'] as Map<String, dynamic>?),
       sharing: SharingConfig.fromJson(json['sharing'] as Map<String, dynamic>?),
       google: GoogleConfig.fromJson(json['google'] as Map<String, dynamic>?),
+      googleSheets: GoogleSheetsConfig.fromJson(
+        json['googleSheets'] as Map<String, dynamic>?,
+      ),
       driveFolder: DriveFolderConfig.fromJson(
         json['driveFolder'] as Map<String, dynamic>?,
-      ),
-      firebase: FirebaseDatabaseConfig.fromJson(
-        json['firebase'] as Map<String, dynamic>?,
       ),
       allowedMimeTypes:
           (json['allowedMimeTypes'] as List<dynamic>?)
@@ -47,149 +47,33 @@ class AppConfig {
   }
 }
 
-class FirebaseDatabaseConfig {
-  const FirebaseDatabaseConfig({
-    this.userCollection = 'users',
-    this.bankDetailsCollection = 'bankDetails',
-    this.aadhaarDetailsCollection = 'aadhaarDetails',
-    this.panDetailsCollection = 'panDetails',
-    this.passportDetailsCollection = 'passportDetails',
-    this.drivingLicenseDetailsCollection = 'drivingLicenseDetails',
-    this.voterIdDetailsCollection = 'voterIdDetails',
-    this.upiDetailsCollection = 'upiDetails',
-    this.loginDetailsCollection = 'loginDetails',
-    this.addressDetailsCollection = 'addressDetails',
-    this.enableTableCollections = true,
-    this.bankDetailsTableCollection = 'bankDetailsTable',
-    this.aadhaarDetailsTableCollection = 'aadhaarDetailsTable',
-    this.panDetailsTableCollection = 'panDetailsTable',
-    this.passportDetailsTableCollection = 'passportDetailsTable',
-    this.drivingLicenseDetailsTableCollection = 'drivingLicenseDetailsTable',
-    this.voterIdDetailsTableCollection = 'voterIdDetailsTable',
-    this.upiDetailsTableCollection = 'upiDetailsTable',
-    this.loginDetailsTableCollection = 'loginDetailsTable',
-    this.addressDetailsTableCollection = 'addressDetailsTable',
+class GoogleSheetsConfig {
+  const GoogleSheetsConfig({
+    this.enabled = true,
+    this.spreadsheetId = '',
+    this.spreadsheetTitle = 'Secure2share Data',
+    this.sheetName = 'Secure Details',
   });
 
-  final String userCollection;
-  final String bankDetailsCollection;
-  final String aadhaarDetailsCollection;
-  final String panDetailsCollection;
-  final String passportDetailsCollection;
-  final String drivingLicenseDetailsCollection;
-  final String voterIdDetailsCollection;
-  final String upiDetailsCollection;
-  final String loginDetailsCollection;
-  final String addressDetailsCollection;
-  final bool enableTableCollections;
-  final String bankDetailsTableCollection;
-  final String aadhaarDetailsTableCollection;
-  final String panDetailsTableCollection;
-  final String passportDetailsTableCollection;
-  final String drivingLicenseDetailsTableCollection;
-  final String voterIdDetailsTableCollection;
-  final String upiDetailsTableCollection;
-  final String loginDetailsTableCollection;
-  final String addressDetailsTableCollection;
+  final bool enabled;
+  final String spreadsheetId;
+  final String spreadsheetTitle;
+  final String sheetName;
 
-  factory FirebaseDatabaseConfig.fromJson(Map<String, dynamic>? json) {
-    return FirebaseDatabaseConfig(
-      userCollection: _readName(json, 'userCollection', 'users'),
-      bankDetailsCollection: _readName(
+  factory GoogleSheetsConfig.fromJson(Map<String, dynamic>? json) {
+    return GoogleSheetsConfig(
+      enabled: json?['enabled'] as bool? ?? true,
+      spreadsheetId: _readText(json, 'spreadsheetId', ''),
+      spreadsheetTitle: _readText(
         json,
-        'bankDetailsCollection',
-        'bankDetails',
+        'spreadsheetTitle',
+        'Secure2share Data',
       ),
-      aadhaarDetailsCollection: _readName(
-        json,
-        'aadhaarDetailsCollection',
-        'aadhaarDetails',
-      ),
-      panDetailsCollection: _readName(
-        json,
-        'panDetailsCollection',
-        'panDetails',
-      ),
-      passportDetailsCollection: _readName(
-        json,
-        'passportDetailsCollection',
-        'passportDetails',
-      ),
-      drivingLicenseDetailsCollection: _readName(
-        json,
-        'drivingLicenseDetailsCollection',
-        'drivingLicenseDetails',
-      ),
-      voterIdDetailsCollection: _readName(
-        json,
-        'voterIdDetailsCollection',
-        'voterIdDetails',
-      ),
-      upiDetailsCollection: _readName(
-        json,
-        'upiDetailsCollection',
-        'upiDetails',
-      ),
-      loginDetailsCollection: _readName(
-        json,
-        'loginDetailsCollection',
-        'loginDetails',
-      ),
-      addressDetailsCollection: _readName(
-        json,
-        'addressDetailsCollection',
-        'addressDetails',
-      ),
-      enableTableCollections: json?['enableTableCollections'] as bool? ?? true,
-      bankDetailsTableCollection: _readName(
-        json,
-        'bankDetailsTableCollection',
-        'bankDetailsTable',
-      ),
-      aadhaarDetailsTableCollection: _readName(
-        json,
-        'aadhaarDetailsTableCollection',
-        'aadhaarDetailsTable',
-      ),
-      panDetailsTableCollection: _readName(
-        json,
-        'panDetailsTableCollection',
-        'panDetailsTable',
-      ),
-      passportDetailsTableCollection: _readName(
-        json,
-        'passportDetailsTableCollection',
-        'passportDetailsTable',
-      ),
-      drivingLicenseDetailsTableCollection: _readName(
-        json,
-        'drivingLicenseDetailsTableCollection',
-        'drivingLicenseDetailsTable',
-      ),
-      voterIdDetailsTableCollection: _readName(
-        json,
-        'voterIdDetailsTableCollection',
-        'voterIdDetailsTable',
-      ),
-      upiDetailsTableCollection: _readName(
-        json,
-        'upiDetailsTableCollection',
-        'upiDetailsTable',
-      ),
-      loginDetailsTableCollection: _readName(
-        json,
-        'loginDetailsTableCollection',
-        'loginDetailsTable',
-      ),
-      addressDetailsTableCollection: _readName(
-        json,
-        'addressDetailsTableCollection',
-        'addressDetailsTable',
-      ),
+      sheetName: _readText(json, 'sheetName', 'Secure Details'),
     );
   }
 
-  static String _readName(
+  static String _readText(
     Map<String, dynamic>? json,
     String key,
     String fallback,
@@ -256,7 +140,7 @@ class LoginConfig {
   const LoginConfig({
     this.title = 'Welcome to Secure2share',
     this.subtitle =
-        'Sign in with Google to browse your files, import them into private app storage, preview them, and share safely.',
+        'Sign in with Google to sync your saved details into Google Sheets and share safely.',
     this.googleButtonText = 'Continue with Google',
   });
 
@@ -269,7 +153,7 @@ class LoginConfig {
       title: json?['title'] as String? ?? 'Welcome to Secure2share',
       subtitle:
           json?['subtitle'] as String? ??
-          'Sign in with Google to browse your files, import them into private app storage, preview them, and share safely.',
+          'Sign in with Google to sync your saved details into Google Sheets and share safely.',
       googleButtonText:
           json?['googleButtonText'] as String? ?? 'Continue with Google',
     );

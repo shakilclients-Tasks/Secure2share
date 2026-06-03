@@ -50,10 +50,6 @@ dependencies:
   _discoveryapis_commons: 1.0.7
   googleapis_auth: 2.3.1
   syncfusion_flutter_pdfviewer: 33.2.7
-  firebase_core: ^4.9.0
-  cloud_firestore: ^6.4.1
-  firebase_storage: ^13.4.1
-  firebase_auth: ^6.5.1
   local_auth: ^3.0.1
 
 dev_dependencies:

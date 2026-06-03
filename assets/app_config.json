@@ -5,7 +5,7 @@
   },
   "login": {
     "title": "Welcome to Secure2share",
-    "subtitle": "Sign in with Google to browse your files, import them into private app storage, preview them, and share safely.",
+    "subtitle": "Sign in with Google to sync your saved details into Google Sheets and share safely.",
     "googleButtonText": "Continue with Google"
   },
   "home": {
@@ -51,31 +51,15 @@
     "clientId": "",
     "serverClientId": "672581368220-kngu6trj4liaoqv4cq8679cvvnaotvcs.apps.googleusercontent.com"
   },
+  "googleSheets": {
+    "enabled": true,
+    "spreadsheetId": "",
+    "spreadsheetTitle": "Secure2share Data",
+    "sheetName": "Secure Details"
+  },
   "driveFolder": {
     "name": "Secure2share",
     "parentId": "root"
-  },
-  "firebase": {
-    "userCollection": "users",
-    "bankDetailsCollection": "bankDetails",
-    "aadhaarDetailsCollection": "aadhaarDetails",
-    "panDetailsCollection": "panDetails",
-    "passportDetailsCollection": "passportDetails",
-    "drivingLicenseDetailsCollection": "drivingLicenseDetails",
-    "voterIdDetailsCollection": "voterIdDetails",
-    "upiDetailsCollection": "upiDetails",
-    "loginDetailsCollection": "loginDetails",
-    "addressDetailsCollection": "addressDetails",
-    "enableTableCollections": true,
-    "bankDetailsTableCollection": "bankDetailsTable",
-    "aadhaarDetailsTableCollection": "aadhaarDetailsTable",
-    "panDetailsTableCollection": "panDetailsTable",
-    "passportDetailsTableCollection": "passportDetailsTable",
-    "drivingLicenseDetailsTableCollection": "drivingLicenseDetailsTable",
-    "voterIdDetailsTableCollection": "voterIdDetailsTable",
-    "upiDetailsTableCollection": "upiDetailsTable",
-    "loginDetailsTableCollection": "loginDetailsTable",
-    "addressDetailsTableCollection": "addressDetailsTable"
   },
   "allowedMimeTypes": []
 }

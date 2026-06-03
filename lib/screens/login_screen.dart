@@ -22,7 +22,9 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      await Drive2ShareScope.of(context).authService.signIn();
+      final dependencies = Drive2ShareScope.of(context);
+      await dependencies.authService.signIn();
+      await dependencies.googleSheetsService.syncSavedSecureDetails();
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(builder: (_) => const HomeScreen()),

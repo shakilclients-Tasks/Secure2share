@@ -55,6 +55,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final dependencies = Drive2ShareScope.of(context);
     final config = dependencies.config.home;
     final colorScheme = Theme.of(context).colorScheme;
+    final greeting = _homeGreeting(dependencies);
 
     return Scaffold(
       appBar: AppBar(title: Text(dependencies.config.appName)),
@@ -71,7 +72,9 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.fromLTRB(20, 10, 20, 96),
             children: <Widget>[
               Text(
-                'Hi User',
+                greeting,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.displaySmall?.copyWith(
                   fontWeight: FontWeight.w800,
                   letterSpacing: 0,
@@ -163,6 +166,18 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  String _homeGreeting(AppDependencies dependencies) {
+    final user = dependencies.authService.currentUser;
+    final displayName = user?.displayName?.trim();
+    final email = user?.email.trim();
+    final accountName = displayName != null && displayName.isNotEmpty
+        ? displayName
+        : email != null && email.isNotEmpty
+        ? email
+        : 'User';
+    return 'Hi $accountName';
+  }
+
   Future<void> _share(SecureDetail detail) async {
     try {
       await Drive2ShareScope.of(
@@ -179,7 +194,7 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (context) {
         return AlertDialog(
           title: const Text('Delete details?'),
-          content: Text('Delete "${detail.title}" from this app and Firebase?'),
+          content: Text('Delete "${detail.title}" from this app?'),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -196,10 +211,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     if (shouldDelete != true || !mounted) return;
 
-    final dependencies = Drive2ShareScope.of(context);
     try {
-      await dependencies.firebaseFileService.deleteSecureDetail(detail);
-      await dependencies.recentFileStore.deleteSecureDetail(detail.id);
+      await Drive2ShareScope.of(
+        context,
+      ).recentFileStore.deleteSecureDetail(detail.id);
       _refreshRecentDetails();
       _showSnack('Deleted "${detail.title}".');
     } catch (error) {

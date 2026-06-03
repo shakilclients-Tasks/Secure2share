@@ -74,7 +74,7 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
       builder: (context) {
         return AlertDialog(
           title: const Text('Delete recent file?'),
-          content: Text('Delete "${detail.title}" from this app and Firebase?'),
+          content: Text('Delete "${detail.title}" from this app?'),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -91,10 +91,10 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
     );
     if (shouldDelete != true || !mounted) return;
 
-    final dependencies = Drive2ShareScope.of(context);
     try {
-      await dependencies.firebaseFileService.deleteSecureDetail(detail);
-      await dependencies.recentFileStore.deleteSecureDetail(detail.id);
+      await Drive2ShareScope.of(
+        context,
+      ).recentFileStore.deleteSecureDetail(detail.id);
       await _refresh();
       _showSnack('Deleted "${detail.title}".');
     } catch (error) {

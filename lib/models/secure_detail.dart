@@ -90,17 +90,6 @@ class SecureDetail {
     };
   }
 
-  Map<String, Object?> toFirestoreFields() {
-    return <String, Object?>{
-      'id': id,
-      'type': type.value,
-      'title': title,
-      ...fields,
-      'createdAtMillis': createdAtMillis,
-      'updatedAtMillis': updatedAtMillis,
-    };
-  }
-
   String toShareText({bool maskSecrets = false}) {
     final lines = <String>[
       title,

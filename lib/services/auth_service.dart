@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sign_in_as_googleapis_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:googleapis/drive/v3.dart' as drive;
+import 'package:googleapis/sheets/v4.dart' as sheets;
 import 'package:googleapis_auth/googleapis_auth.dart' as auth;
 
-const List<String> driveScopes = <String>[drive.DriveApi.driveScope];
+const List<String> googleApiScopes = <String>[
+  sheets.SheetsApi.spreadsheetsScope,
+];
 
 class AuthService {
   GoogleSignInAccount? currentUser;
@@ -40,7 +42,7 @@ class AuthService {
       currentUser = await lightweight;
       if (currentUser != null) {
         _authorization = await currentUser!.authorizationClient
-            .authorizationForScopes(driveScopes);
+            .authorizationForScopes(googleApiScopes);
       }
     }
   }
@@ -57,7 +59,7 @@ class AuthService {
     await GoogleSignIn.instance.signOut();
     _authorization = null;
     final user = await GoogleSignIn.instance.authenticate(
-      scopeHint: driveScopes,
+      scopeHint: googleApiScopes,
     );
     currentUser = user;
     _authorization = await _authorize(user, prompt: true);
@@ -79,10 +81,10 @@ class AuthService {
     _authorization ??= await _authorize(user, prompt: true);
     final authorization = _authorization;
     if (authorization == null) {
-      throw StateError('Drive permission was not granted.');
+      throw StateError('Google Sheets permission was not granted.');
     }
 
-    return authorization.authClient(scopes: driveScopes);
+    return authorization.authClient(scopes: googleApiScopes);
   }
 
   Future<GoogleSignInClientAuthorization?> _authorize(
@@ -90,10 +92,10 @@ class AuthService {
     required bool prompt,
   }) async {
     final existing = await user.authorizationClient.authorizationForScopes(
-      driveScopes,
+      googleApiScopes,
     );
     if (existing != null || !prompt) return existing;
-    return user.authorizationClient.authorizeScopes(driveScopes);
+    return user.authorizationClient.authorizeScopes(googleApiScopes);
   }
 
   String? _cleanOAuthClientId(String? value) {
