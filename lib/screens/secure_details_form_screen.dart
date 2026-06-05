@@ -184,11 +184,6 @@ class _SecureDetailsFormScreenState extends State<SecureDetailsFormScreen> {
     AppDependencies dependencies,
     model.SecureDetail detail,
   ) {
-    if (detail.images.isEmpty) {
-      return Future<DriveImageUploadResult>.value(
-        DriveImageUploadResult(images: detail.images),
-      );
-    }
     return dependencies.driveService.uploadSecureDetailImages(
       config: dependencies.config.driveFolder,
       detail: detail,
@@ -277,40 +272,6 @@ class _SecureDetailsFormScreenState extends State<SecureDetailsFormScreen> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
             children: <Widget>[
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 240),
-                curve: Curves.easeOutCubic,
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainerHigh,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: colorScheme.outlineVariant),
-                ),
-                child: Row(
-                  children: <Widget>[
-                    CircleAvatar(
-                      radius: 28,
-                      backgroundColor: colorScheme.primaryContainer,
-                      foregroundColor: colorScheme.onPrimaryContainer,
-                      child: Icon(details.icon),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            details.title,
-                            style: Theme.of(context).textTheme.titleLarge
-                                ?.copyWith(fontWeight: FontWeight.w800),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 18),
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(

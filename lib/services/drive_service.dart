@@ -17,8 +17,8 @@ class DriveService {
   DriveService(this._authService);
 
   final AuthService _authService;
-  String? _cachedImageFolderId;
-  String? _cachedImageFolderKey;
+  final Map<String, Future<DriveFolder>> _folderFutures =
+      <String, Future<DriveFolder>>{};
 
   Future<DriveFolder?> findFolder(DriveFolderConfig config) async {
     final client = await _authService.authClient();
@@ -82,14 +82,10 @@ class DriveService {
     required SecureDetail detail,
     required bool allowAuthorizationRetry,
   }) async {
-    if (detail.images.isEmpty) {
-      return DriveImageUploadResult(images: detail.images);
-    }
-
     final client = await _authService.authClient();
     try {
       final api = drive.DriveApi(client);
-      final folder = await _findOrCreateImageFolder(api, config);
+      final folder = await _findOrCreateDetailFolder(api, config, detail);
       final attempts = await Future.wait(
         detail.images.map(
           (image) => _uploadSecureDetailImage(
@@ -144,13 +140,7 @@ class DriveService {
       }
 
       final extension = p.extension(image.fileName);
-      final driveName =
-          [
-            _safePathSegment(detail.type.value),
-            detail.id,
-            image.side.value,
-          ].join('_') +
-          extension;
+      final driveName = '${image.side.value}$extension';
       final created = await api.files.create(
         drive.File()
           ..name = driveName
@@ -346,24 +336,76 @@ class DriveService {
     return items;
   }
 
-  Future<DriveFolder> _findOrCreateImageFolder(
+  Future<DriveFolder> _findOrCreateDetailFolder(
     drive.DriveApi api,
     DriveFolderConfig config,
+    SecureDetail detail,
   ) async {
-    final cacheKey = _imageFolderCacheKey(config);
-    final cachedFolderId = _cachedImageFolderKey == cacheKey
-        ? _cachedImageFolderId
-        : null;
-    if (cachedFolderId != null) {
-      return DriveFolder(id: cachedFolderId, name: config.imageFolderName);
-    }
+    final rootFolder = await _findOrCreateFolder(
+      api,
+      parentId: config.parentId,
+      name: config.rootFolderName,
+      marker: 'organization-root',
+    );
+    final appFolder = await _findOrCreateFolder(
+      api,
+      parentId: rootFolder.id,
+      name: config.name,
+      marker: 'digital-wallet-root',
+    );
+    final categoryFolder = await _findOrCreateFolder(
+      api,
+      parentId: appFolder.id,
+      name: _safePathSegment(detail.categoryName),
+      marker: 'category-${detail.type.value}',
+    );
+    return _findOrCreateFolder(
+      api,
+      parentId: categoryFolder.id,
+      name: _recordFolderName(detail),
+      marker: 'record-${detail.id}',
+    );
+  }
 
+  Future<DriveFolder> _findOrCreateFolder(
+    drive.DriveApi api, {
+    required String parentId,
+    required String name,
+    required String marker,
+  }) async {
+    final cacheKey = _folderCacheKey(parentId, name);
+    final cached = _folderFutures[cacheKey];
+    if (cached != null) return cached;
+
+    final pending = _loadOrCreateFolder(
+      api,
+      parentId: parentId,
+      name: name,
+      marker: marker,
+    );
+    _folderFutures[cacheKey] = pending;
+    try {
+      return await pending;
+    } catch (_) {
+      if (identical(_folderFutures[cacheKey], pending)) {
+        _folderFutures.remove(cacheKey);
+      }
+      rethrow;
+    }
+  }
+
+  Future<DriveFolder> _loadOrCreateFolder(
+    drive.DriveApi api, {
+    required String parentId,
+    required String name,
+    required String marker,
+  }) async {
     final response = await api.files.list(
       q: [
         'trashed = false',
         "mimeType = 'application/vnd.google-apps.folder'",
-        "name = ${_queryLiteral(config.imageFolderName)}",
-        "${_queryLiteral(config.parentId)} in parents",
+        "name = ${_queryLiteral(name)}",
+        "${_queryLiteral(parentId)} in parents",
       ].join(' and '),
       orderBy: 'modifiedTime desc',
       pageSize: 1,
@@ -374,27 +416,21 @@ class DriveService {
         ?.where((file) => file.id?.isNotEmpty == true)
         .firstOrNull;
     if (existing != null) {
-      final folder = DriveFolder.fromDriveFile(existing);
-      _cacheImageFolder(cacheKey, folder.id);
-      return folder;
+      return DriveFolder.fromDriveFile(existing);
     }
 
     final created = await api.files.create(
       drive.File()
-        ..name = config.imageFolderName
+        ..name = name
         ..mimeType = 'application/vnd.google-apps.folder'
-        ..parents = <String>[config.parentId]
-        ..appProperties = const <String, String>{
-          'digitalWalletFolder': 'secure-detail-images',
-        },
+        ..parents = <String>[parentId]
+        ..appProperties = <String, String>{'digitalWalletFolder': marker},
       $fields: 'id,name',
     );
     if (created.id == null || created.id!.isEmpty) {
-      throw StateError('Google Drive did not return the image folder ID.');
+      throw StateError('Google Drive did not return the folder ID.');
     }
-    final folder = DriveFolder.fromDriveFile(created);
-    _cacheImageFolder(cacheKey, folder.id);
-    return folder;
+    return DriveFolder.fromDriveFile(created);
   }
 
   Future<void> _collectFiles(
@@ -467,14 +503,17 @@ class DriveService {
     return "'$escaped'";
   }
 
-  String _imageFolderCacheKey(DriveFolderConfig config) {
+  String _folderCacheKey(String parentId, String name) {
     final account = _authService.currentUser?.id ?? 'default';
-    return '$account::${config.parentId}::${config.imageFolderName}';
+    return '$account::$parentId::$name';
   }
 
-  void _cacheImageFolder(String cacheKey, String folderId) {
-    _cachedImageFolderKey = cacheKey;
-    _cachedImageFolderId = folderId;
+  String _recordFolderName(SecureDetail detail) {
+    final shortId = detail.id.length <= 8
+        ? detail.id
+        : detail.id.substring(0, 8);
+    final value = _safePathSegment('${detail.displayName} - $shortId');
+    return value.length <= 120 ? value : value.substring(0, 120);
   }
 }
 

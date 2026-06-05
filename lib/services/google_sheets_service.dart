@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:_discoveryapis_commons/_discoveryapis_commons.dart' as commons;
+import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:googleapis/sheets/v4.dart' as sheets;
 
 import '../models/app_config.dart';
@@ -18,6 +19,8 @@ class GoogleSheetsService {
   static const String _storedSpreadsheetIdPrefix = 'googleSheetsSpreadsheetId';
   static const String _syncedDetailIdsPrefix =
       'googleSheetsTableSyncedDetailIds';
+  static const String _spreadsheetMarkerKey = 'digitalWalletData';
+  static const String _spreadsheetMarkerValue = 'primary';
   static const String _combinedCategoryHeader = 'Category';
   static const List<String> _keyValueHeaders = <String>['Key', 'Value'];
   static const List<String> _legacyHeaders = <String>[
@@ -60,6 +63,7 @@ class GoogleSheetsService {
       final api = sheets.SheetsApi(client);
       final spreadsheetId = await _spreadsheetId(
         api,
+        drive.DriveApi(client),
         initialSheetName: worksheetNameFor(details.first),
       );
 
@@ -123,6 +127,7 @@ class GoogleSheetsService {
       final sheetName = worksheetNameFor(detail);
       final spreadsheetId = await _spreadsheetId(
         api,
+        drive.DriveApi(client),
         initialSheetName: sheetName,
       );
 
@@ -152,7 +157,8 @@ class GoogleSheetsService {
   }
 
   Future<String> _spreadsheetId(
-    sheets.SheetsApi api, {
+    sheets.SheetsApi api,
+    drive.DriveApi driveApi, {
     required String initialSheetName,
   }) async {
     final accountKey = _accountKey();
@@ -171,6 +177,14 @@ class GoogleSheetsService {
     if (storedId != null && storedId.trim().isNotEmpty) {
       _cacheSpreadsheetId(accountKey, storedId);
       return storedId;
+    }
+
+    final existingId = await _findExistingSpreadsheetId(driveApi);
+    if (existingId != null) {
+      await recentFileStore.setSetting(_storedSpreadsheetIdKey, existingId);
+      _cacheSpreadsheetId(accountKey, existingId);
+      await _markSpreadsheet(driveApi, existingId);
+      return existingId;
     }
 
     final spreadsheet = await api.spreadsheets.create(
@@ -195,7 +209,60 @@ class GoogleSheetsService {
     await recentFileStore.setSetting(_storedSpreadsheetIdKey, createdId);
     _cacheSpreadsheetId(accountKey, createdId);
     _knownSheets[createdId] = <String>{initialSheetName};
+    await _markSpreadsheet(driveApi, createdId);
     return createdId;
+  }
+
+  Future<String?> _findExistingSpreadsheetId(drive.DriveApi api) async {
+    final baseQuery = <String>[
+      'trashed = false',
+      "mimeType = 'application/vnd.google-apps.spreadsheet'",
+    ];
+    final queries = <String>[
+      <String>[
+        ...baseQuery,
+        "appProperties has { key='$_spreadsheetMarkerKey' and value='$_spreadsheetMarkerValue' }",
+      ].join(' and '),
+      <String>[
+        ...baseQuery,
+        'name = ${_driveQueryLiteral(config.spreadsheetTitle)}',
+      ].join(' and '),
+    ];
+
+    for (final query in queries) {
+      final response = await api.files.list(
+        q: query,
+        orderBy: 'modifiedTime desc',
+        pageSize: 1,
+        spaces: 'drive',
+        $fields: 'files(id)',
+      );
+      final id = response.files
+          ?.map((file) => file.id)
+          .whereType<String>()
+          .where((value) => value.isNotEmpty)
+          .firstOrNull;
+      if (id != null) return id;
+    }
+    return null;
+  }
+
+  Future<void> _markSpreadsheet(
+    drive.DriveApi api,
+    String spreadsheetId,
+  ) async {
+    try {
+      await api.files.update(
+        drive.File()
+          ..appProperties = const <String, String>{
+            _spreadsheetMarkerKey: _spreadsheetMarkerValue,
+          },
+        spreadsheetId,
+        $fields: 'id',
+      );
+    } catch (_) {
+      // The exact title lookup still prevents duplicate spreadsheet creation.
+    }
   }
 
   Future<void> _appendRow(
@@ -340,12 +407,7 @@ class GoogleSheetsService {
   }
 
   static String worksheetNameFor(SecureDetail detail) {
-    const suffix = ' Details';
-    final title = detail.title.trim();
-    final category = title.endsWith(suffix)
-        ? title.substring(0, title.length - suffix.length)
-        : title;
-    final sanitized = category
+    final sanitized = detail.categoryName
         .replaceAll(RegExp(r"[\[\]:*?/\\]"), ' ')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
@@ -424,6 +486,11 @@ class GoogleSheetsService {
     if (match != null) return match.group(1) ?? '';
     if (trimmed.startsWith('http')) return '';
     return trimmed;
+  }
+
+  String _driveQueryLiteral(String value) {
+    final escaped = value.replaceAll(r'\', r'\\').replaceAll("'", r"\'");
+    return "'$escaped'";
   }
 
   String _sheetsSetupMessage(commons.DetailedApiRequestError error) {

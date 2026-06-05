@@ -58,9 +58,9 @@
     "sheetName": "Secure Details"
   },
   "driveFolder": {
+    "rootFolderName": "OPIXTECH",
     "name": "Digital Wallet",
-    "parentId": "root",
-    "imageFolderName": "Digital Wallet Images"
+    "parentId": "root"
   },
   "allowedMimeTypes": []
 }

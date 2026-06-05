@@ -120,7 +120,11 @@ class SecureDetailTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       child: ListTile(
         leading: _SecureDetailIcon(type: detail.type),
-        title: Text(detail.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        title: Text(
+          detail.displayName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         subtitle: Text(_subtitle, maxLines: 2, overflow: TextOverflow.ellipsis),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
@@ -144,25 +148,8 @@ class SecureDetailTile extends StatelessWidget {
   }
 
   String get _subtitle {
-    final name = _displayName;
     final savedAt = FormatUtils.dateTimeFromMillis(detail.createdAtMillis);
-    if (name == null || name.isEmpty) return 'Saved $savedAt';
-    return '$name\nSaved $savedAt';
-  }
-
-  String? get _displayName {
-    for (final key in <String>[
-      'name',
-      'fullName',
-      'cardHolderName',
-      'serviceName',
-      'bankName',
-      'username',
-    ]) {
-      final value = detail.fields[key]?.trim();
-      if (value != null && value.isNotEmpty) return value;
-    }
-    return null;
+    return 'Saved $savedAt';
   }
 }
 

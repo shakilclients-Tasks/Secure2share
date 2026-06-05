@@ -99,37 +99,37 @@ class GoogleConfig {
 
 class DriveFolderConfig {
   const DriveFolderConfig({
+    this.rootFolderName = 'OPIXTECH',
     this.name = 'Digital Wallet',
     this.parentId = 'root',
-    this.imageFolderName = 'Digital Wallet Images',
   });
 
+  final String rootFolderName;
   final String name;
   final String parentId;
-  final String imageFolderName;
 
   DriveFolderConfig copyWith({
+    String? rootFolderName,
     String? name,
     String? parentId,
-    String? imageFolderName,
   }) {
     return DriveFolderConfig(
+      rootFolderName: rootFolderName ?? this.rootFolderName,
       name: name ?? this.name,
       parentId: parentId ?? this.parentId,
-      imageFolderName: imageFolderName ?? this.imageFolderName,
     );
   }
 
   factory DriveFolderConfig.fromJson(Map<String, dynamic>? json) {
+    final rootFolderName = (json?['rootFolderName'] as String?)?.trim();
     final name = (json?['name'] as String?)?.trim();
     final parentId = (json?['parentId'] as String?)?.trim();
-    final imageFolderName = (json?['imageFolderName'] as String?)?.trim();
     return DriveFolderConfig(
+      rootFolderName: rootFolderName?.isNotEmpty == true
+          ? rootFolderName!
+          : 'OPIXTECH',
       name: name?.isNotEmpty == true ? name! : 'Digital Wallet',
       parentId: parentId?.isNotEmpty == true ? parentId! : 'root',
-      imageFolderName: imageFolderName?.isNotEmpty == true
-          ? imageFolderName!
-          : 'Digital Wallet Images',
     );
   }
 }

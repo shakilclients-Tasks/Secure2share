@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 // shakils projects this
 import '../main.dart';
 import '../models/secure_detail.dart';
-import '../utils/format_utils.dart';
 
 class SecureDetailDetailsScreen extends StatefulWidget {
   const SecureDetailDetailsScreen({super.key, required this.detail});
@@ -33,44 +32,6 @@ class _SecureDetailDetailsScreenState extends State<SecureDetailDetailsScreen> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: <Widget>[
-            Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: colorScheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: colorScheme.outlineVariant),
-              ),
-              child: Row(
-                children: <Widget>[
-                  CircleAvatar(
-                    radius: 28,
-                    backgroundColor: colorScheme.primaryContainer,
-                    foregroundColor: colorScheme.onPrimaryContainer,
-                    child: Icon(_iconFor(detail.type)),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          detail.title,
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.w800),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          FormatUtils.dateTimeFromMillis(
-                            detail.createdAtMillis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
             if (detail.needsAttention) ...<Widget>[
               _AttentionPanel(detail: detail),
               const SizedBox(height: 16),
@@ -275,28 +236,6 @@ class _SecureDetailDetailsScreenState extends State<SecureDetailDetailsScreen> {
       return File(image.localPath).readAsBytes();
     }
     throw StateError('This image is not available in Google Drive.');
-  }
-
-  IconData _iconFor(SecureDetailType type) {
-    return switch (type) {
-      SecureDetailType.bank => Icons.account_balance_outlined,
-      SecureDetailType.aadhaar => Icons.badge_outlined,
-      SecureDetailType.pan => Icons.assignment_ind_outlined,
-      SecureDetailType.passport => Icons.flight_takeoff_outlined,
-      SecureDetailType.drivingLicense => Icons.directions_car_outlined,
-      SecureDetailType.voterId => Icons.how_to_vote_outlined,
-      SecureDetailType.upi => Icons.currency_rupee_outlined,
-      SecureDetailType.login => Icons.key_outlined,
-      SecureDetailType.password => Icons.password_outlined,
-      SecureDetailType.nationalId => Icons.badge_outlined,
-      SecureDetailType.taxId => Icons.receipt_long_outlined,
-      SecureDetailType.socialSecurity => Icons.security_outlined,
-      SecureDetailType.healthInsurance => Icons.medical_information_outlined,
-      SecureDetailType.residencePermit => Icons.assignment_outlined,
-      SecureDetailType.debitCard => Icons.account_balance_wallet_outlined,
-      SecureDetailType.creditCard => Icons.credit_card_outlined,
-      SecureDetailType.address => Icons.location_on_outlined,
-    };
   }
 }
 

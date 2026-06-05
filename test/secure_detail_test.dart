@@ -1,4 +1,5 @@
 import 'package:drive2share/models/secure_detail.dart';
+import 'package:drive2share/models/app_config.dart';
 import 'package:drive2share/services/auth_service.dart';
 import 'package:drive2share/services/google_sheets_service.dart';
 import 'package:drive2share/services/recent_file_store.dart';
@@ -96,6 +97,30 @@ void main() {
 
     expect(GoogleSheetsService.worksheetNameFor(upi), 'UPI');
     expect(GoogleSheetsService.worksheetNameFor(voterId), 'Voter ID');
+  });
+
+  test('uses the entered name as the secure detail display name', () {
+    const detail = SecureDetail(
+      id: 'aadhaar-id',
+      type: SecureDetailType.aadhaar,
+      fields: <String, String>{
+        'name': 'To Tu To',
+        'aadhaarNumber': '123456789012',
+      },
+      createdAtMillis: 1,
+      updatedAtMillis: 1,
+    );
+
+    expect(detail.displayName, 'To Tu To');
+    expect(detail.categoryName, 'Aadhaar');
+  });
+
+  test('uses the OPIXTECH and Digital Wallet Drive hierarchy defaults', () {
+    const config = DriveFolderConfig();
+
+    expect(config.rootFolderName, 'OPIXTECH');
+    expect(config.name, 'Digital Wallet');
+    expect(config.parentId, 'root');
   });
 
   test('category worksheets contain only field values', () {

@@ -127,6 +127,30 @@ class SecureDetail {
 
   String get title => type.title;
 
+  String get displayName {
+    for (final key in <String>[
+      'name',
+      'fullName',
+      'cardHolderName',
+      'serviceName',
+      'bankName',
+      'username',
+    ]) {
+      final value = fields[key]?.trim();
+      if (value != null && value.isNotEmpty) return value;
+    }
+    return title;
+  }
+
+  String get categoryName {
+    const suffix = ' Details';
+    final value = title.trim();
+    if (value.endsWith(suffix)) {
+      return value.substring(0, value.length - suffix.length);
+    }
+    return value;
+  }
+
   int get secretFieldCount =>
       fields.keys.where(SecureDetail.isSecretField).length;
 
