@@ -1,6 +1,6 @@
 class AppConfig {
   const AppConfig({
-    this.appName = 'Secure2share',
+    this.appName = 'Digital Wallet',
     this.splash = const SplashConfig(),
     this.login = const LoginConfig(),
     this.home = const HomeConfig(),
@@ -25,7 +25,7 @@ class AppConfig {
 
   factory AppConfig.fromJson(Map<String, dynamic> json) {
     return AppConfig(
-      appName: json['appName'] as String? ?? 'Secure2share',
+      appName: json['appName'] as String? ?? 'Digital Wallet',
       splash: SplashConfig.fromJson(json['splash'] as Map<String, dynamic>?),
       login: LoginConfig.fromJson(json['login'] as Map<String, dynamic>?),
       home: HomeConfig.fromJson(json['home'] as Map<String, dynamic>?),
@@ -51,7 +51,7 @@ class GoogleSheetsConfig {
   const GoogleSheetsConfig({
     this.enabled = true,
     this.spreadsheetId = '',
-    this.spreadsheetTitle = 'Secure2share Data',
+    this.spreadsheetTitle = 'Digital Wallet Data',
     this.sheetName = 'Secure Details',
   });
 
@@ -67,7 +67,7 @@ class GoogleSheetsConfig {
       spreadsheetTitle: _readText(
         json,
         'spreadsheetTitle',
-        'Secure2share Data',
+        'Digital Wallet Data',
       ),
       sheetName: _readText(json, 'sheetName', 'Secure Details'),
     );
@@ -98,24 +98,38 @@ class GoogleConfig {
 }
 
 class DriveFolderConfig {
-  const DriveFolderConfig({this.name = 'Secure2share', this.parentId = 'root'});
+  const DriveFolderConfig({
+    this.name = 'Digital Wallet',
+    this.parentId = 'root',
+    this.imageFolderName = 'Digital Wallet Images',
+  });
 
   final String name;
   final String parentId;
+  final String imageFolderName;
 
-  DriveFolderConfig copyWith({String? name, String? parentId}) {
+  DriveFolderConfig copyWith({
+    String? name,
+    String? parentId,
+    String? imageFolderName,
+  }) {
     return DriveFolderConfig(
       name: name ?? this.name,
       parentId: parentId ?? this.parentId,
+      imageFolderName: imageFolderName ?? this.imageFolderName,
     );
   }
 
   factory DriveFolderConfig.fromJson(Map<String, dynamic>? json) {
     final name = (json?['name'] as String?)?.trim();
     final parentId = (json?['parentId'] as String?)?.trim();
+    final imageFolderName = (json?['imageFolderName'] as String?)?.trim();
     return DriveFolderConfig(
-      name: name?.isNotEmpty == true ? name! : 'Secure2share',
+      name: name?.isNotEmpty == true ? name! : 'Digital Wallet',
       parentId: parentId?.isNotEmpty == true ? parentId! : 'root',
+      imageFolderName: imageFolderName?.isNotEmpty == true
+          ? imageFolderName!
+          : 'Digital Wallet Images',
     );
   }
 }
@@ -138,9 +152,9 @@ class SplashConfig {
 
 class LoginConfig {
   const LoginConfig({
-    this.title = 'Welcome to Secure2share',
+    this.title = 'Welcome to Digital Wallet',
     this.subtitle =
-        'Sign in with Google to sync your saved details into Google Sheets and share safely.',
+        'Sign in with Google to sync details to Google Sheets and document images to Google Drive.',
     this.googleButtonText = 'Continue with Google',
   });
 
@@ -150,10 +164,10 @@ class LoginConfig {
 
   factory LoginConfig.fromJson(Map<String, dynamic>? json) {
     return LoginConfig(
-      title: json?['title'] as String? ?? 'Welcome to Secure2share',
+      title: json?['title'] as String? ?? 'Welcome to Digital Wallet',
       subtitle:
           json?['subtitle'] as String? ??
-          'Sign in with Google to sync your saved details into Google Sheets and share safely.',
+          'Sign in with Google to sync details to Google Sheets and document images to Google Drive.',
       googleButtonText:
           json?['googleButtonText'] as String? ?? 'Continue with Google',
     );

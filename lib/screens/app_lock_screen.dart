@@ -94,7 +94,7 @@ class _AppLockScreenState extends State<AppLockScreen>
                   const AppLogo(size: 104),
                   const SizedBox(height: 26),
                   Text(
-                    'Unlock Secure2share',
+                    'Unlock Digital Wallet',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.w800,

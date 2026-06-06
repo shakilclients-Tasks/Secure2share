@@ -18,7 +18,7 @@ class AppLockService {
       }
 
       final didAuthenticate = await _auth.authenticate(
-        localizedReason: 'Unlock Secure2share to view your secure details',
+        localizedReason: 'Unlock Digital Wallet to view your secure details',
         biometricOnly: false,
         sensitiveTransaction: true,
         persistAcrossBackgrounding: true,
@@ -39,7 +39,7 @@ class AppLockService {
       return AppLockResult(
         isUnlocked: false,
         canContinueWithoutLock: false,
-        message: 'Unable to unlock Secure2share: $error',
+        message: 'Unable to unlock Digital Wallet: $error',
       );
     }
   }
@@ -61,7 +61,7 @@ class AppLockService {
       LocalAuthExceptionCode.noBiometricsEnrolled =>
         'No fingerprint or face unlock is enrolled on this device.',
       LocalAuthExceptionCode.noCredentialsSet =>
-        'Set a phone PIN, password, or pattern to protect Secure2share.',
+        'Set a phone PIN, password, or pattern to protect Digital Wallet.',
       LocalAuthExceptionCode.biometricHardwareTemporarilyUnavailable =>
         'Biometric hardware is temporarily unavailable.',
       LocalAuthExceptionCode.temporaryLockout =>

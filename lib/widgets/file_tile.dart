@@ -144,10 +144,25 @@ class SecureDetailTile extends StatelessWidget {
   }
 
   String get _subtitle {
-    final name = detail.fields['name'];
+    final name = _displayName;
     final savedAt = FormatUtils.dateTimeFromMillis(detail.createdAtMillis);
     if (name == null || name.isEmpty) return 'Saved $savedAt';
     return '$name\nSaved $savedAt';
+  }
+
+  String? get _displayName {
+    for (final key in <String>[
+      'name',
+      'fullName',
+      'cardHolderName',
+      'serviceName',
+      'bankName',
+      'username',
+    ]) {
+      final value = detail.fields[key]?.trim();
+      if (value != null && value.isNotEmpty) return value;
+    }
+    return null;
   }
 }
 
@@ -162,12 +177,20 @@ class _SecureDetailIcon extends StatelessWidget {
     final icon = switch (type) {
       SecureDetailType.bank => Icons.account_balance_outlined,
       SecureDetailType.aadhaar => Icons.badge_outlined,
-      SecureDetailType.pan => Icons.credit_card_outlined,
+      SecureDetailType.pan => Icons.assignment_ind_outlined,
       SecureDetailType.passport => Icons.flight_takeoff_outlined,
       SecureDetailType.drivingLicense => Icons.directions_car_outlined,
       SecureDetailType.voterId => Icons.how_to_vote_outlined,
       SecureDetailType.upi => Icons.currency_rupee_outlined,
       SecureDetailType.login => Icons.key_outlined,
+      SecureDetailType.password => Icons.password_outlined,
+      SecureDetailType.nationalId => Icons.badge_outlined,
+      SecureDetailType.taxId => Icons.receipt_long_outlined,
+      SecureDetailType.socialSecurity => Icons.security_outlined,
+      SecureDetailType.healthInsurance => Icons.medical_information_outlined,
+      SecureDetailType.residencePermit => Icons.assignment_outlined,
+      SecureDetailType.debitCard => Icons.account_balance_wallet_outlined,
+      SecureDetailType.creditCard => Icons.credit_card_outlined,
       SecureDetailType.address => Icons.location_on_outlined,
     };
     return Container(

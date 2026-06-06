@@ -6,23 +6,23 @@ import '../models/secure_detail.dart';
 
 class RecentFileStore {
   Database? _database;
+  final List<SecureDetail> _sessionSecureDetails = <SecureDetail>[];
 
   Future<void> init() async {
     final dbPath = await getDatabasesPath();
     _database = await openDatabase(
       p.join(dbPath, 'drive2share_flutter.db'),
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await _createRecentFilesTable(db);
         await _createSettingsTable(db);
-        await _createSecureDetailsTable(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           await _createSettingsTable(db);
         }
-        if (oldVersion < 3) {
-          await _createSecureDetailsTable(db);
+        if (oldVersion < 4) {
+          await db.execute('DROP TABLE IF EXISTS secure_details');
         }
       },
     );
@@ -48,19 +48,6 @@ class RecentFileStore {
           CREATE TABLE IF NOT EXISTS app_settings(
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
-          )
-        ''');
-  }
-
-  Future<void> _createSecureDetailsTable(Database db) async {
-    await db.execute('''
-          CREATE TABLE IF NOT EXISTS secure_details(
-            id TEXT PRIMARY KEY,
-            type TEXT NOT NULL,
-            title TEXT NOT NULL,
-            dataJson TEXT NOT NULL,
-            createdAtMillis INTEGER NOT NULL,
-            updatedAtMillis INTEGER NOT NULL
           )
         ''');
   }
@@ -98,28 +85,18 @@ class RecentFileStore {
   }
 
   Future<void> saveSecureDetail(SecureDetail detail) async {
-    await _db.insert(
-      'secure_details',
-      detail.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    _sessionSecureDetails.removeWhere((item) => item.id == detail.id);
+    _sessionSecureDetails.insert(0, detail);
   }
 
   Future<List<SecureDetail>> listSecureDetails({int? limit}) async {
-    final rows = await _db.query(
-      'secure_details',
-      orderBy: 'createdAtMillis DESC',
-      limit: limit,
-    );
-    return rows.map(SecureDetail.fromMap).toList();
+    final details = List<SecureDetail>.unmodifiable(_sessionSecureDetails);
+    if (limit == null || details.length <= limit) return details;
+    return details.take(limit).toList(growable: false);
   }
 
   Future<void> deleteSecureDetail(String id) async {
-    await _db.delete(
-      'secure_details',
-      where: 'id = ?',
-      whereArgs: <Object?>[id],
-    );
+    _sessionSecureDetails.removeWhere((detail) => detail.id == id);
   }
 
   Future<String?> getSetting(String key) async {

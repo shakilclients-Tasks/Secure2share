@@ -9,6 +9,9 @@ import 'services/drive_service.dart';
 import 'services/file_import_service.dart';
 import 'services/google_sheets_service.dart';
 import 'services/recent_file_store.dart';
+import 'services/secure_image_service.dart';
+import 'services/theme_controller.dart';
+import 'services/user_profile_store.dart';
 import 'widgets/app_logo.dart';
 
 Future<void> main() async {
@@ -20,6 +23,11 @@ Future<AppDependencies> _loadDependencies() async {
   final config = await AppConfigService.load();
   final recentFileStore = RecentFileStore();
   await recentFileStore.init();
+  final themeController = AppThemeController(recentFileStore);
+  await themeController.init();
+  final userProfileStore = UserProfileStore(recentFileStore);
+  const secureImageService = SecureImageService();
+  await secureImageService.purgeLegacyLocalImages();
 
   final authService = AuthService();
   await authService.initialize(
@@ -42,6 +50,9 @@ Future<AppDependencies> _loadDependencies() async {
     ),
     googleSheetsService: googleSheetsService,
     recentFileStore: recentFileStore,
+    secureImageService: secureImageService,
+    themeController: themeController,
+    userProfileStore: userProfileStore,
   );
 }
 
@@ -163,13 +174,18 @@ class Drive2ShareApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return Drive2ShareScope(
       dependencies: dependencies,
-      child: MaterialApp(
-        debugShowCheckedModeBanner: false,
-        title: dependencies.config.appName,
-        themeMode: ThemeMode.system,
-        theme: _lightTheme(),
-        darkTheme: _darkTheme(),
-        home: const AppLockScreen(child: SplashScreen()),
+      child: AnimatedBuilder(
+        animation: dependencies.themeController,
+        builder: (context, _) {
+          return MaterialApp(
+            debugShowCheckedModeBanner: false,
+            title: dependencies.config.appName,
+            themeMode: dependencies.themeController.themeMode,
+            theme: _lightTheme(),
+            darkTheme: _darkTheme(),
+            home: const AppLockScreen(child: SplashScreen()),
+          );
+        },
       ),
     );
   }
@@ -261,6 +277,9 @@ class AppDependencies {
     required this.fileImportService,
     required this.googleSheetsService,
     required this.recentFileStore,
+    required this.secureImageService,
+    required this.themeController,
+    required this.userProfileStore,
   });
 
   final AppConfig config;
@@ -269,6 +288,9 @@ class AppDependencies {
   final FileImportService fileImportService;
   final GoogleSheetsService googleSheetsService;
   final RecentFileStore recentFileStore;
+  final SecureImageService secureImageService;
+  final AppThemeController themeController;
+  final UserProfileStore userProfileStore;
 }
 
 class Drive2ShareScope extends InheritedWidget {

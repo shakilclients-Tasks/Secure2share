@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 // shakils projects this
@@ -100,6 +102,35 @@ class _SecureDetailDetailsScreenState extends State<SecureDetailDetailsScreen> {
                 ],
               ),
             ),
+            if (detail.images.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 16),
+              Text(
+                'Document images',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 10),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final width = (constraints.maxWidth - 12) / 2;
+                  return Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: <Widget>[
+                      for (final image in detail.images)
+                        SizedBox(
+                          width: width,
+                          child: _SecureImageCard(
+                            image: image,
+                            onTap: () => _showImage(image),
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ],
             const SizedBox(height: 16),
             FilledButton.icon(
               onPressed: () => _share(maskSecrets: true),
@@ -177,18 +208,165 @@ class _SecureDetailDetailsScreenState extends State<SecureDetailDetailsScreen> {
     }
   }
 
+  Future<void> _showImage(SecureDetailImage image) {
+    final imageBytes = _loadImageBytes(image);
+    return showDialog<void>(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 620, maxHeight: 760),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                ListTile(
+                  title: Text(image.side.label),
+                  trailing: IconButton(
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                  ),
+                ),
+                Flexible(
+                  child: FutureBuilder<Uint8List>(
+                    future: imageBytes,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState != ConnectionState.done) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      final bytes = snapshot.data;
+                      if (bytes == null) {
+                        return Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(32),
+                            child: Text(
+                              snapshot.error?.toString() ??
+                                  'Unable to load this image.',
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        );
+                      }
+                      return InteractiveViewer(
+                        minScale: 0.8,
+                        maxScale: 4,
+                        child: Image.memory(bytes, fit: BoxFit.contain),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<Uint8List> _loadImageBytes(SecureDetailImage image) async {
+    final driveFileId = image.driveFileId;
+    if (driveFileId != null && driveFileId.isNotEmpty) {
+      return Drive2ShareScope.of(
+        context,
+      ).driveService.downloadSecureDetailImage(driveFileId);
+    }
+
+    if (image.localPath.isNotEmpty) {
+      return File(image.localPath).readAsBytes();
+    }
+    throw StateError('This image is not available in Google Drive.');
+  }
+
   IconData _iconFor(SecureDetailType type) {
     return switch (type) {
       SecureDetailType.bank => Icons.account_balance_outlined,
       SecureDetailType.aadhaar => Icons.badge_outlined,
-      SecureDetailType.pan => Icons.credit_card_outlined,
+      SecureDetailType.pan => Icons.assignment_ind_outlined,
       SecureDetailType.passport => Icons.flight_takeoff_outlined,
       SecureDetailType.drivingLicense => Icons.directions_car_outlined,
       SecureDetailType.voterId => Icons.how_to_vote_outlined,
       SecureDetailType.upi => Icons.currency_rupee_outlined,
       SecureDetailType.login => Icons.key_outlined,
+      SecureDetailType.password => Icons.password_outlined,
+      SecureDetailType.nationalId => Icons.badge_outlined,
+      SecureDetailType.taxId => Icons.receipt_long_outlined,
+      SecureDetailType.socialSecurity => Icons.security_outlined,
+      SecureDetailType.healthInsurance => Icons.medical_information_outlined,
+      SecureDetailType.residencePermit => Icons.assignment_outlined,
+      SecureDetailType.debitCard => Icons.account_balance_wallet_outlined,
+      SecureDetailType.creditCard => Icons.credit_card_outlined,
       SecureDetailType.address => Icons.location_on_outlined,
     };
+  }
+}
+
+class _SecureImageCard extends StatelessWidget {
+  const _SecureImageCard({required this.image, required this.onTap});
+
+  final SecureDetailImage image;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Material(
+      color: colorScheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(color: colorScheme.outlineVariant),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            AspectRatio(
+              aspectRatio: 1.25,
+              child: ColoredBox(
+                color: colorScheme.surfaceContainerHigh,
+                child: Icon(
+                  image.isUploadedToDrive
+                      ? Icons.cloud_outlined
+                      : Icons.broken_image_outlined,
+                  size: 42,
+                  color: image.isUploadedToDrive
+                      ? colorScheme.primary
+                      : colorScheme.error,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      image.side.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    image.isUploadedToDrive
+                        ? Icons.cloud_done_outlined
+                        : Icons.cloud_off_outlined,
+                    size: 19,
+                    color: image.isUploadedToDrive
+                        ? colorScheme.primary
+                        : colorScheme.error,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

@@ -43,7 +43,7 @@ class MainActivity : FlutterFragmentActivity() {
     private fun shareText(args: Map<*, *>?) {
         val text = args?.get("text") as? String
             ?: throw IllegalArgumentException("Share text is missing.")
-        val subject = args["subject"] as? String ?: "Secure2share"
+        val subject = args["subject"] as? String ?: "Digital Wallet"
 
         val installedPackages = shareTargetPackages.filter(::isPackageInstalled)
         if (installedPackages.isEmpty()) {

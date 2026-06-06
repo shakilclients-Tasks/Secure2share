@@ -1,11 +1,11 @@
 {
-  "appName": "Secure2share",
+  "appName": "Digital Wallet",
   "splash": {
     "subtitle": "Create, save, and share private files securely"
   },
   "login": {
-    "title": "Welcome to Secure2share",
-    "subtitle": "Sign in with Google to sync your saved details into Google Sheets and share safely.",
+    "title": "Welcome to Digital Wallet",
+    "subtitle": "Sign in with Google to sync details to Google Sheets and document images to Google Drive.",
     "googleButtonText": "Continue with Google"
   },
   "home": {
@@ -54,12 +54,13 @@
   "googleSheets": {
     "enabled": true,
     "spreadsheetId": "",
-    "spreadsheetTitle": "Secure2share Data",
+    "spreadsheetTitle": "Digital Wallet Data",
     "sheetName": "Secure Details"
   },
   "driveFolder": {
-    "name": "Secure2share",
-    "parentId": "root"
+    "name": "Digital Wallet",
+    "parentId": "root",
+    "imageFolderName": "Digital Wallet Images"
   },
   "allowedMimeTypes": []
 }

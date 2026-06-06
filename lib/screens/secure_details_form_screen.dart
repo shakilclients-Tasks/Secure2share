@@ -1,11 +1,16 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
-
+// shakils projects this
 import '../main.dart';
 import '../models/secure_detail.dart' as model;
+import '../services/drive_service.dart';
+import '../services/secure_image_service.dart';
 
-Future<model.SecureDetail?> openSecureDetailsCreator(
+Future<SecureDetailSaveResult?> openSecureDetailsCreator(
   BuildContext context,
 ) async {
   final type = await showModalBottomSheet<model.SecureDetailType>(
@@ -16,8 +21,15 @@ Future<model.SecureDetail?> openSecureDetailsCreator(
   );
   if (!context.mounted || type == null) return null;
 
-  return Navigator.of(context).push<model.SecureDetail>(
-    PageRouteBuilder<model.SecureDetail>(
+  return openSecureDetailsForm(context, type);
+}
+
+Future<SecureDetailSaveResult?> openSecureDetailsForm(
+  BuildContext context,
+  model.SecureDetailType type,
+) {
+  return Navigator.of(context).push<SecureDetailSaveResult>(
+    PageRouteBuilder<SecureDetailSaveResult>(
       pageBuilder: (_, animation, _) => FadeTransition(
         opacity: animation,
         child: SecureDetailsFormScreen(type: type),
@@ -36,6 +48,21 @@ Future<model.SecureDetail?> openSecureDetailsCreator(
   );
 }
 
+class SecureDetailSaveResult {
+  const SecureDetailSaveResult({
+    required this.detail,
+    this.sheetsError,
+    this.driveError,
+  });
+
+  final model.SecureDetail detail;
+  final String? sheetsError;
+  final String? driveError;
+
+  bool get syncedToSheets => sheetsError == null;
+  bool get imagesUploadedToDrive => detail.images.isEmpty || driveError == null;
+}
+
 class SecureDetailsFormScreen extends StatefulWidget {
   const SecureDetailsFormScreen({super.key, required this.type});
 
@@ -52,6 +79,8 @@ class _SecureDetailsFormScreenState extends State<SecureDetailsFormScreen> {
   late final List<_SecureDetailsField> _fields;
   late final Map<String, TextEditingController> _controllers;
   late final Map<String, bool> _hiddenFields;
+  final Map<model.SecureDetailImageSide, SelectedSecureImage> _selectedImages =
+      <model.SecureDetailImageSide, SelectedSecureImage>{};
   bool _isSaving = false;
 
   @override
@@ -76,6 +105,8 @@ class _SecureDetailsFormScreenState extends State<SecureDetailsFormScreen> {
   }
 
   Future<void> _save() async {
+    if (_isSaving) return;
+
     final formState = _formKey.currentState;
     if (formState == null || !formState.validate()) return;
 
@@ -83,32 +114,50 @@ class _SecureDetailsFormScreenState extends State<SecureDetailsFormScreen> {
     try {
       final dependencies = Drive2ShareScope.of(context);
       final now = DateTime.now().millisecondsSinceEpoch;
-      final detail = model.SecureDetail(
-        id: _uuid.v4(),
+      final detailId = _uuid.v4();
+      final images = await dependencies.secureImageService.prepareImages(
+        selectedImages: model.SecureDetailImageSide.values
+            .map((side) => _selectedImages[side])
+            .whereType<SelectedSecureImage>()
+            .toList(growable: false),
+      );
+      var detail = model.SecureDetail(
+        id: detailId,
         type: widget.type,
-        fields: <String, String>{
-          for (final field in _fields)
-            field.key: _controllers[field.key]!.text.trim(),
-        },
+        fields: _normalizedFields(),
         createdAtMillis: now,
         updatedAtMillis: now,
+        images: images,
       );
 
-      await dependencies.recentFileStore.saveSecureDetail(detail);
-      try {
-        await dependencies.googleSheetsService.appendSecureDetail(detail);
-      } catch (sheetsError) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Saved in app, but Google Sheets sync failed: $sheetsError',
-            ),
-          ),
+      final sheetsSave = _saveToSheets(dependencies, detail);
+      final driveUpload = _uploadImages(dependencies, detail);
+
+      final sheetsErrorMessage = await sheetsSave;
+      final uploadResult = await driveUpload;
+      final driveErrorMessage = uploadResult.error;
+      if (detail.images.isNotEmpty) {
+        detail = detail.copyWith(
+          images: uploadResult.images,
+          updatedAtMillis: DateTime.now().millisecondsSinceEpoch,
         );
+        if (uploadResult.isSuccessful) {
+          try {
+            await FilePicker.clearTemporaryFiles();
+          } catch (_) {
+            // Some platforms do not create or expose picker temporary files.
+          }
+        }
       }
+      await dependencies.recentFileStore.saveSecureDetail(detail);
       if (!mounted) return;
-      Navigator.of(context).pop(detail);
+      Navigator.of(context).pop(
+        SecureDetailSaveResult(
+          detail: detail,
+          sheetsError: sheetsErrorMessage,
+          driveError: driveErrorMessage,
+        ),
+      );
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -117,6 +166,89 @@ class _SecureDetailsFormScreenState extends State<SecureDetailsFormScreen> {
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
+  }
+
+  Future<String?> _saveToSheets(
+    AppDependencies dependencies,
+    model.SecureDetail detail,
+  ) async {
+    try {
+      await dependencies.googleSheetsService.appendSecureDetail(detail);
+      return null;
+    } catch (error) {
+      return error.toString();
+    }
+  }
+
+  Future<DriveImageUploadResult> _uploadImages(
+    AppDependencies dependencies,
+    model.SecureDetail detail,
+  ) {
+    if (detail.images.isEmpty) {
+      return Future<DriveImageUploadResult>.value(
+        DriveImageUploadResult(images: detail.images),
+      );
+    }
+    return dependencies.driveService.uploadSecureDetailImages(
+      config: dependencies.config.driveFolder,
+      detail: detail,
+    );
+  }
+
+  Map<String, String> _normalizedFields() {
+    final fields = <String, String>{};
+    for (final field in _fields) {
+      final controller = _controllers[field.key];
+      if (controller == null) continue;
+
+      final value = _normalizeFieldValue(field, controller.text);
+      if (field.isRequired || value.isNotEmpty) {
+        fields[field.key] = value;
+      }
+    }
+    return fields;
+  }
+
+  String _normalizeFieldValue(_SecureDetailsField field, String value) {
+    final text = value.trim();
+    if (field.textCapitalization == TextCapitalization.characters) {
+      return text.toUpperCase();
+    }
+    return text;
+  }
+
+  Future<void> _pickImage(model.SecureDetailImageSide side) async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
+      withData: false,
+    );
+    if (result == null || result.files.isEmpty || !mounted) return;
+
+    final file = result.files.single;
+    final path = file.path;
+    if (path == null || path.isEmpty) {
+      _showSnack('Unable to read the selected image.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      _showSnack('Please select an image smaller than 10 MB.');
+      return;
+    }
+
+    setState(() {
+      _selectedImages[side] = SelectedSecureImage(
+        side: side,
+        sourcePath: path,
+        originalName: file.name,
+      );
+    });
+  }
+
+  void _showSnack(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -229,6 +361,32 @@ class _SecureDetailsFormScreenState extends State<SecureDetailsFormScreen> {
                   ],
                 ),
               ),
+              const SizedBox(height: 18),
+              Text(
+                'Document images',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: <Widget>[
+                  for (final side in model.SecureDetailImageSide.values) ...[
+                    Expanded(
+                      child: _ImagePickerTile(
+                        side: side,
+                        selectedImage: _selectedImages[side],
+                        onPick: () => _pickImage(side),
+                        onRemove: () {
+                          setState(() => _selectedImages.remove(side));
+                        },
+                      ),
+                    ),
+                    if (side != model.SecureDetailImageSide.values.last)
+                      const SizedBox(width: 12),
+                  ],
+                ],
+              ),
             ],
           ),
         ),
@@ -258,14 +416,20 @@ class _SecureDetailsFormScreenState extends State<SecureDetailsFormScreen> {
           isSecret: true,
           minLength: 6,
         ),
-        const _SecureDetailsField(
+        _SecureDetailsField(
           key: 'ifsc',
           label: 'IFSC code',
           hint: 'Example: SBIN0000001',
           icon: Icons.tag_outlined,
           textCapitalization: TextCapitalization.characters,
+          inputFormatters: <TextInputFormatter>[
+            const _UpperCaseTextFormatter(),
+            LengthLimitingTextInputFormatter(11),
+          ],
           minLength: 11,
           exactLength: 11,
+          pattern: RegExp(r'^[A-Z]{4}0[A-Z0-9]{6}$'),
+          patternMessage: 'Enter a valid IFSC code.',
         ),
         const _SecureDetailsField(
           key: 'branch',
@@ -325,13 +489,16 @@ class _SecureDetailsFormScreenState extends State<SecureDetailsFormScreen> {
           key: 'panNumber',
           label: 'PAN number',
           hint: 'Example: ABCDE1234F',
-          icon: Icons.credit_card_outlined,
+          icon: Icons.assignment_ind_outlined,
           textCapitalization: TextCapitalization.characters,
           inputFormatters: <TextInputFormatter>[
+            const _UpperCaseTextFormatter(),
             LengthLimitingTextInputFormatter(10),
           ],
           isSecret: true,
           exactLength: 10,
+          pattern: RegExp(r'^[A-Z]{5}[0-9]{4}[A-Z]$'),
+          patternMessage: 'Enter a valid PAN number.',
         ),
         const _SecureDetailsField(
           key: 'fatherName',
@@ -363,6 +530,7 @@ class _SecureDetailsFormScreenState extends State<SecureDetailsFormScreen> {
           icon: Icons.flight_takeoff_outlined,
           textCapitalization: TextCapitalization.characters,
           inputFormatters: <TextInputFormatter>[
+            const _UpperCaseTextFormatter(),
             LengthLimitingTextInputFormatter(16),
           ],
           isSecret: true,
@@ -398,6 +566,7 @@ class _SecureDetailsFormScreenState extends State<SecureDetailsFormScreen> {
           icon: Icons.badge_outlined,
           textCapitalization: TextCapitalization.characters,
           inputFormatters: <TextInputFormatter>[
+            const _UpperCaseTextFormatter(),
             LengthLimitingTextInputFormatter(20),
           ],
           isSecret: true,
@@ -433,6 +602,7 @@ class _SecureDetailsFormScreenState extends State<SecureDetailsFormScreen> {
           icon: Icons.how_to_vote_outlined,
           textCapitalization: TextCapitalization.characters,
           inputFormatters: <TextInputFormatter>[
+            const _UpperCaseTextFormatter(),
             LengthLimitingTextInputFormatter(16),
           ],
           isSecret: true,
@@ -522,6 +692,344 @@ class _SecureDetailsFormScreenState extends State<SecureDetailsFormScreen> {
           textCapitalization: TextCapitalization.sentences,
         ),
       ],
+      model.SecureDetailType.password => <_SecureDetailsField>[
+        const _SecureDetailsField(
+          key: 'serviceName',
+          label: 'Service name',
+          hint: 'App or website name',
+          icon: Icons.apps_outlined,
+          textCapitalization: TextCapitalization.words,
+        ),
+        const _SecureDetailsField(
+          key: 'username',
+          label: 'Username',
+          hint: 'Email, phone, or username',
+          icon: Icons.person_outline,
+          keyboardType: TextInputType.emailAddress,
+        ),
+        const _SecureDetailsField(
+          key: 'password',
+          label: 'Password',
+          hint: 'Password',
+          icon: Icons.password_outlined,
+          isSecret: true,
+          minLength: 1,
+        ),
+        const _SecureDetailsField(
+          key: 'notes',
+          label: 'Notes',
+          hint: 'Recovery notes',
+          icon: Icons.notes_outlined,
+          maxLines: 4,
+          textCapitalization: TextCapitalization.sentences,
+        ),
+      ],
+      model.SecureDetailType.nationalId => <_SecureDetailsField>[
+        const _SecureDetailsField(
+          key: 'name',
+          label: 'Name',
+          hint: 'Full name',
+          icon: Icons.person_outline,
+          textCapitalization: TextCapitalization.words,
+        ),
+        _SecureDetailsField(
+          key: 'idNumber',
+          label: 'ID number',
+          hint: 'National ID number',
+          icon: Icons.badge_outlined,
+          textCapitalization: TextCapitalization.characters,
+          inputFormatters: <TextInputFormatter>[
+            const _UpperCaseTextFormatter(),
+            LengthLimitingTextInputFormatter(32),
+          ],
+          isSecret: true,
+          minLength: 4,
+        ),
+        const _SecureDetailsField(
+          key: 'dob',
+          label: 'Date of birth',
+          hint: 'DD/MM/YYYY',
+          icon: Icons.calendar_today_outlined,
+          keyboardType: TextInputType.datetime,
+        ),
+        const _SecureDetailsField(
+          key: 'expiryDate',
+          label: 'Expiry date',
+          hint: 'DD/MM/YYYY',
+          icon: Icons.event_available_outlined,
+          keyboardType: TextInputType.datetime,
+          isRequired: false,
+        ),
+        const _SecureDetailsField(
+          key: 'notes',
+          label: 'Notes',
+          hint: 'Extra notes',
+          icon: Icons.notes_outlined,
+          maxLines: 3,
+          textCapitalization: TextCapitalization.sentences,
+          isRequired: false,
+        ),
+      ],
+      model.SecureDetailType.taxId => <_SecureDetailsField>[
+        const _SecureDetailsField(
+          key: 'name',
+          label: 'Name',
+          hint: 'Full name or business name',
+          icon: Icons.person_outline,
+          textCapitalization: TextCapitalization.words,
+        ),
+        _SecureDetailsField(
+          key: 'taxNumber',
+          label: 'Tax number',
+          hint: 'Tax ID / TIN / NIF',
+          icon: Icons.receipt_long_outlined,
+          textCapitalization: TextCapitalization.characters,
+          inputFormatters: <TextInputFormatter>[
+            const _UpperCaseTextFormatter(),
+            LengthLimitingTextInputFormatter(32),
+          ],
+          isSecret: true,
+          minLength: 4,
+        ),
+        const _SecureDetailsField(
+          key: 'country',
+          label: 'Country',
+          hint: 'Country',
+          icon: Icons.public_outlined,
+          textCapitalization: TextCapitalization.words,
+        ),
+        const _SecureDetailsField(
+          key: 'notes',
+          label: 'Notes',
+          hint: 'Extra notes',
+          icon: Icons.notes_outlined,
+          maxLines: 3,
+          textCapitalization: TextCapitalization.sentences,
+          isRequired: false,
+        ),
+      ],
+      model.SecureDetailType.socialSecurity => <_SecureDetailsField>[
+        const _SecureDetailsField(
+          key: 'name',
+          label: 'Name',
+          hint: 'Full name',
+          icon: Icons.person_outline,
+          textCapitalization: TextCapitalization.words,
+        ),
+        _SecureDetailsField(
+          key: 'socialSecurityNumber',
+          label: 'Social Security number',
+          hint: 'Social Security / Insurance number',
+          icon: Icons.security_outlined,
+          textCapitalization: TextCapitalization.characters,
+          inputFormatters: <TextInputFormatter>[
+            const _UpperCaseTextFormatter(),
+            LengthLimitingTextInputFormatter(32),
+          ],
+          isSecret: true,
+          minLength: 4,
+        ),
+        const _SecureDetailsField(
+          key: 'dob',
+          label: 'Date of birth',
+          hint: 'DD/MM/YYYY',
+          icon: Icons.calendar_today_outlined,
+          keyboardType: TextInputType.datetime,
+        ),
+        const _SecureDetailsField(
+          key: 'notes',
+          label: 'Notes',
+          hint: 'Extra notes',
+          icon: Icons.notes_outlined,
+          maxLines: 3,
+          textCapitalization: TextCapitalization.sentences,
+          isRequired: false,
+        ),
+      ],
+      model.SecureDetailType.healthInsurance => <_SecureDetailsField>[
+        const _SecureDetailsField(
+          key: 'name',
+          label: 'Name',
+          hint: 'Member name',
+          icon: Icons.person_outline,
+          textCapitalization: TextCapitalization.words,
+        ),
+        _SecureDetailsField(
+          key: 'healthId',
+          label: 'Health ID',
+          hint: 'Health card or member ID',
+          icon: Icons.medical_information_outlined,
+          textCapitalization: TextCapitalization.characters,
+          inputFormatters: <TextInputFormatter>[
+            const _UpperCaseTextFormatter(),
+            LengthLimitingTextInputFormatter(32),
+          ],
+          isSecret: true,
+          minLength: 4,
+        ),
+        _SecureDetailsField(
+          key: 'policyNumber',
+          label: 'Policy number',
+          hint: 'Insurance policy number',
+          icon: Icons.policy_outlined,
+          textCapitalization: TextCapitalization.characters,
+          inputFormatters: <TextInputFormatter>[
+            const _UpperCaseTextFormatter(),
+            LengthLimitingTextInputFormatter(32),
+          ],
+          isSecret: true,
+          minLength: 4,
+          isRequired: false,
+        ),
+        const _SecureDetailsField(
+          key: 'provider',
+          label: 'Provider',
+          hint: 'Insurance or health provider',
+          icon: Icons.local_hospital_outlined,
+          textCapitalization: TextCapitalization.words,
+        ),
+        const _SecureDetailsField(
+          key: 'expiryDate',
+          label: 'Expiry date',
+          hint: 'DD/MM/YYYY',
+          icon: Icons.event_available_outlined,
+          keyboardType: TextInputType.datetime,
+          isRequired: false,
+        ),
+      ],
+      model.SecureDetailType.residencePermit => <_SecureDetailsField>[
+        const _SecureDetailsField(
+          key: 'name',
+          label: 'Name',
+          hint: 'Full name',
+          icon: Icons.person_outline,
+          textCapitalization: TextCapitalization.words,
+        ),
+        _SecureDetailsField(
+          key: 'permitNumber',
+          label: 'Permit number',
+          hint: 'Residence permit number',
+          icon: Icons.assignment_outlined,
+          textCapitalization: TextCapitalization.characters,
+          inputFormatters: <TextInputFormatter>[
+            const _UpperCaseTextFormatter(),
+            LengthLimitingTextInputFormatter(32),
+          ],
+          isSecret: true,
+          minLength: 4,
+        ),
+        const _SecureDetailsField(
+          key: 'nationality',
+          label: 'Nationality',
+          hint: 'Nationality',
+          icon: Icons.public_outlined,
+          textCapitalization: TextCapitalization.words,
+        ),
+        const _SecureDetailsField(
+          key: 'expiryDate',
+          label: 'Expiry date',
+          hint: 'DD/MM/YYYY',
+          icon: Icons.event_available_outlined,
+          keyboardType: TextInputType.datetime,
+        ),
+        const _SecureDetailsField(
+          key: 'address',
+          label: 'Address',
+          hint: 'Local address',
+          icon: Icons.home_outlined,
+          maxLines: 3,
+          textCapitalization: TextCapitalization.sentences,
+          isRequired: false,
+        ),
+      ],
+      model.SecureDetailType.debitCard => <_SecureDetailsField>[
+        const _SecureDetailsField(
+          key: 'cardHolderName',
+          label: 'Cardholder name',
+          hint: 'Name on card',
+          icon: Icons.person_outline,
+          textCapitalization: TextCapitalization.words,
+        ),
+        _SecureDetailsField(
+          key: 'cardNumber',
+          label: 'Card number',
+          hint: 'Debit card number',
+          icon: Icons.account_balance_wallet_outlined,
+          keyboardType: TextInputType.number,
+          inputFormatters: <TextInputFormatter>[
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(19),
+          ],
+          isSecret: true,
+          minLength: 12,
+        ),
+        const _SecureDetailsField(
+          key: 'expiryDate',
+          label: 'Expiry date',
+          hint: 'MM/YYYY',
+          icon: Icons.event_available_outlined,
+          keyboardType: TextInputType.datetime,
+        ),
+        const _SecureDetailsField(
+          key: 'bankName',
+          label: 'Bank name',
+          hint: 'Card issuing bank',
+          icon: Icons.account_balance_outlined,
+          textCapitalization: TextCapitalization.words,
+        ),
+        const _SecureDetailsField(
+          key: 'notes',
+          label: 'Notes',
+          hint: 'Card notes',
+          icon: Icons.notes_outlined,
+          maxLines: 3,
+          textCapitalization: TextCapitalization.sentences,
+        ),
+      ],
+      model.SecureDetailType.creditCard => <_SecureDetailsField>[
+        const _SecureDetailsField(
+          key: 'cardHolderName',
+          label: 'Cardholder name',
+          hint: 'Name on card',
+          icon: Icons.person_outline,
+          textCapitalization: TextCapitalization.words,
+        ),
+        _SecureDetailsField(
+          key: 'cardNumber',
+          label: 'Card number',
+          hint: 'Credit card number',
+          icon: Icons.credit_card_outlined,
+          keyboardType: TextInputType.number,
+          inputFormatters: <TextInputFormatter>[
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(19),
+          ],
+          isSecret: true,
+          minLength: 12,
+        ),
+        const _SecureDetailsField(
+          key: 'expiryDate',
+          label: 'Expiry date',
+          hint: 'MM/YYYY',
+          icon: Icons.event_available_outlined,
+          keyboardType: TextInputType.datetime,
+        ),
+        const _SecureDetailsField(
+          key: 'bankName',
+          label: 'Bank name',
+          hint: 'Card issuing bank',
+          icon: Icons.account_balance_outlined,
+          textCapitalization: TextCapitalization.words,
+        ),
+        const _SecureDetailsField(
+          key: 'notes',
+          label: 'Notes',
+          hint: 'Card notes',
+          icon: Icons.notes_outlined,
+          maxLines: 3,
+          textCapitalization: TextCapitalization.sentences,
+        ),
+      ],
       model.SecureDetailType.address => <_SecureDetailsField>[
         const _SecureDetailsField(
           key: 'fullName',
@@ -605,6 +1113,102 @@ class _SecureDetailsFormScreenState extends State<SecureDetailsFormScreen> {
   }
 }
 
+class _ImagePickerTile extends StatelessWidget {
+  const _ImagePickerTile({
+    required this.side,
+    required this.selectedImage,
+    required this.onPick,
+    required this.onRemove,
+  });
+
+  final model.SecureDetailImageSide side;
+  final SelectedSecureImage? selectedImage;
+  final VoidCallback onPick;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final selected = selectedImage;
+
+    return Material(
+      color: colorScheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(color: colorScheme.outlineVariant),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onPick,
+        child: SizedBox(
+          height: 152,
+          child: selected == null
+              ? Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    Icon(
+                      side == model.SecureDetailImageSide.front
+                          ? Icons.add_photo_alternate_outlined
+                          : Icons.flip_to_back_outlined,
+                      size: 34,
+                      color: colorScheme.primary,
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      side.label,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                )
+              : Stack(
+                  fit: StackFit.expand,
+                  children: <Widget>[
+                    Image.file(
+                      File(selected.sourcePath),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => const Center(
+                        child: Icon(Icons.broken_image_outlined, size: 36),
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 7,
+                        ),
+                        color: colorScheme.scrim.withValues(alpha: 0.7),
+                        child: Text(
+                          side.label,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: IconButton.filled(
+                        tooltip: 'Remove ${side.label}',
+                        onPressed: onRemove,
+                        icon: const Icon(Icons.close, size: 18),
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SecureDetailsField {
   const _SecureDetailsField({
     required this.key,
@@ -619,6 +1223,8 @@ class _SecureDetailsField {
     this.isRequired = true,
     this.minLength,
     this.exactLength,
+    this.pattern,
+    this.patternMessage,
   });
 
   final String key;
@@ -633,6 +1239,8 @@ class _SecureDetailsField {
   final bool isRequired;
   final int? minLength;
   final int? exactLength;
+  final RegExp? pattern;
+  final String? patternMessage;
 
   String? validate(String? value) {
     final text = value ?? '';
@@ -647,7 +1255,23 @@ class _SecureDetailsField {
     if (min != null && text.length < min) {
       return '$label must be at least $min characters.';
     }
+    final validationPattern = pattern;
+    if (validationPattern != null && !validationPattern.hasMatch(text)) {
+      return patternMessage ?? '$label is invalid.';
+    }
     return null;
+  }
+}
+
+class _UpperCaseTextFormatter extends TextInputFormatter {
+  const _UpperCaseTextFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    return newValue.copyWith(text: newValue.text.toUpperCase());
   }
 }
 
@@ -669,7 +1293,7 @@ class _DetailsMeta {
       ),
       model.SecureDetailType.pan => const _DetailsMeta(
         title: 'PAN Details',
-        icon: Icons.credit_card_outlined,
+        icon: Icons.assignment_ind_outlined,
       ),
       model.SecureDetailType.passport => const _DetailsMeta(
         title: 'Passport Details',
@@ -690,6 +1314,38 @@ class _DetailsMeta {
       model.SecureDetailType.login => const _DetailsMeta(
         title: 'Login Details',
         icon: Icons.key_outlined,
+      ),
+      model.SecureDetailType.password => const _DetailsMeta(
+        title: 'Passwords',
+        icon: Icons.password_outlined,
+      ),
+      model.SecureDetailType.nationalId => const _DetailsMeta(
+        title: 'National ID',
+        icon: Icons.badge_outlined,
+      ),
+      model.SecureDetailType.taxId => const _DetailsMeta(
+        title: 'Tax ID',
+        icon: Icons.receipt_long_outlined,
+      ),
+      model.SecureDetailType.socialSecurity => const _DetailsMeta(
+        title: 'Social Security',
+        icon: Icons.security_outlined,
+      ),
+      model.SecureDetailType.healthInsurance => const _DetailsMeta(
+        title: 'Health Insurance',
+        icon: Icons.medical_information_outlined,
+      ),
+      model.SecureDetailType.residencePermit => const _DetailsMeta(
+        title: 'Residence Permit',
+        icon: Icons.assignment_outlined,
+      ),
+      model.SecureDetailType.debitCard => const _DetailsMeta(
+        title: 'Debit Card',
+        icon: Icons.account_balance_wallet_outlined,
+      ),
+      model.SecureDetailType.creditCard => const _DetailsMeta(
+        title: 'Credit Card',
+        icon: Icons.credit_card_outlined,
       ),
       model.SecureDetailType.address => const _DetailsMeta(
         title: 'Address Details',
@@ -723,7 +1379,7 @@ class _SecureDetailsSheet extends StatelessWidget {
                 Navigator.of(context).pop(model.SecureDetailType.aadhaar),
           ),
           _SecureChoiceButton(
-            icon: Icons.credit_card_outlined,
+            icon: Icons.assignment_ind_outlined,
             tooltip: 'PAN Details',
             onTap: () => Navigator.of(context).pop(model.SecureDetailType.pan),
           ),
@@ -752,10 +1408,16 @@ class _SecureDetailsSheet extends StatelessWidget {
             onTap: () => Navigator.of(context).pop(model.SecureDetailType.upi),
           ),
           _SecureChoiceButton(
-            icon: Icons.key_outlined,
-            tooltip: 'Login Details',
+            icon: Icons.account_balance_wallet_outlined,
+            tooltip: 'Debit Card',
             onTap: () =>
-                Navigator.of(context).pop(model.SecureDetailType.login),
+                Navigator.of(context).pop(model.SecureDetailType.debitCard),
+          ),
+          _SecureChoiceButton(
+            icon: Icons.credit_card_outlined,
+            tooltip: 'Credit Card',
+            onTap: () =>
+                Navigator.of(context).pop(model.SecureDetailType.creditCard),
           ),
           _SecureChoiceButton(
             icon: Icons.location_on_outlined,

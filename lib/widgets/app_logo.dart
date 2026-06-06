@@ -7,11 +7,12 @@ class AppLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        shape: BoxShape.circle,
+        borderRadius: BorderRadius.circular(size * 0.18),
         boxShadow: <BoxShadow>[
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.18),
@@ -22,7 +23,9 @@ class AppLogo extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: Image.asset(
-        'assets/branding/secure2share_mark.png',
+        isDark
+            ? 'assets/branding/digital_wallet_dark.jpeg'
+            : 'assets/branding/digital_wallet_light.png',
         fit: BoxFit.cover,
       ),
     );

@@ -3,12 +3,10 @@ import 'dart:async';
 import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sign_in_as_googleapis_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:googleapis/sheets/v4.dart' as sheets;
+import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:googleapis_auth/googleapis_auth.dart' as auth;
 
-const List<String> googleApiScopes = <String>[
-  sheets.SheetsApi.spreadsheetsScope,
-];
+const List<String> googleApiScopes = <String>[drive.DriveApi.driveFileScope];
 
 class AuthService {
   GoogleSignInAccount? currentUser;
@@ -56,13 +54,19 @@ class AuthService {
       );
     }
 
-    await GoogleSignIn.instance.signOut();
+    try {
+      await GoogleSignIn.instance.disconnect();
+    } catch (_) {
+      await GoogleSignIn.instance.signOut();
+    }
     _authorization = null;
     final user = await GoogleSignIn.instance.authenticate(
       scopeHint: googleApiScopes,
     );
     currentUser = user;
-    _authorization = await _authorize(user, prompt: true);
+    _authorization = await user.authorizationClient.authorizeScopes(
+      googleApiScopes,
+    );
     return user;
   }
 
@@ -81,10 +85,52 @@ class AuthService {
     _authorization ??= await _authorize(user, prompt: true);
     final authorization = _authorization;
     if (authorization == null) {
-      throw StateError('Google Sheets permission was not granted.');
+      throw StateError('Google Sheets and Drive permission was not granted.');
     }
 
     return authorization.authClient(scopes: googleApiScopes);
+  }
+
+  Future<void> reauthorize() async {
+    final user = currentUser;
+    if (user == null) {
+      await signIn();
+      return;
+    }
+
+    final staleAuthorization = _authorization;
+    if (staleAuthorization != null) {
+      try {
+        await user.authorizationClient.clearAuthorizationToken(
+          accessToken: staleAuthorization.accessToken,
+        );
+      } catch (error) {
+        debugPrint('Unable to clear stale Google token: $error');
+      }
+    }
+
+    _authorization = await user.authorizationClient.authorizeScopes(
+      googleApiScopes,
+    );
+  }
+
+  static bool isInsufficientScope(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('insufficient_scope') ||
+        text.contains('insufficient authentication scopes') ||
+        text.contains('request had insufficient authentication scopes');
+  }
+
+  static String friendlyGoogleError(Object error, {required String service}) {
+    if (isInsufficientScope(error)) {
+      return '$service permission is missing. Reconnect Google and approve Drive access.';
+    }
+
+    final text = error.toString();
+    if (text.contains('access_denied') || text.contains('Access denied')) {
+      return '$service access was denied. Approve the permission and try again.';
+    }
+    return '$service operation failed.';
   }
 
   Future<GoogleSignInClientAuthorization?> _authorize(

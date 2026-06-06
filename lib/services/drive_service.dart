@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:_discoveryapis_commons/_discoveryapis_commons.dart' as commons;
 import 'package:googleapis/drive/v3.dart' as drive;
@@ -8,13 +9,16 @@ import 'package:path_provider/path_provider.dart';
 import '../models/app_config.dart';
 import '../models/drive_file_item.dart';
 import '../models/drive_folder.dart';
+import '../models/secure_detail.dart';
 import '../utils/mime_type_utils.dart';
 import 'auth_service.dart';
 
 class DriveService {
-  const DriveService(this._authService);
+  DriveService(this._authService);
 
   final AuthService _authService;
+  String? _cachedImageFolderId;
+  String? _cachedImageFolderKey;
 
   Future<DriveFolder?> findFolder(DriveFolderConfig config) async {
     final client = await _authService.authClient();
@@ -57,6 +61,168 @@ class DriveService {
         throw StateError('Google Drive did not return the new folder ID.');
       }
       return DriveFolder.fromDriveFile(created);
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<DriveImageUploadResult> uploadSecureDetailImages({
+    required DriveFolderConfig config,
+    required SecureDetail detail,
+  }) async {
+    return _uploadSecureDetailImages(
+      config: config,
+      detail: detail,
+      allowAuthorizationRetry: true,
+    );
+  }
+
+  Future<DriveImageUploadResult> _uploadSecureDetailImages({
+    required DriveFolderConfig config,
+    required SecureDetail detail,
+    required bool allowAuthorizationRetry,
+  }) async {
+    if (detail.images.isEmpty) {
+      return DriveImageUploadResult(images: detail.images);
+    }
+
+    final client = await _authService.authClient();
+    try {
+      final api = drive.DriveApi(client);
+      final folder = await _findOrCreateImageFolder(api, config);
+      final attempts = await Future.wait(
+        detail.images.map(
+          (image) => _uploadSecureDetailImage(
+            api: api,
+            folderId: folder.id,
+            detail: detail,
+            image: image,
+          ),
+        ),
+      );
+      final uploadedImages = attempts
+          .map((attempt) => attempt.image)
+          .toList(growable: false);
+      final firstError = attempts
+          .map((attempt) => attempt.error)
+          .whereType<String>()
+          .firstOrNull;
+
+      return DriveImageUploadResult(images: uploadedImages, error: firstError);
+    } catch (error) {
+      if (allowAuthorizationRetry && AuthService.isInsufficientScope(error)) {
+        await _authService.reauthorize();
+        return _uploadSecureDetailImages(
+          config: config,
+          detail: detail,
+          allowAuthorizationRetry: false,
+        );
+      }
+      return DriveImageUploadResult(
+        images: detail.images,
+        error: AuthService.friendlyGoogleError(error, service: 'Google Drive'),
+      );
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<_DriveImageUploadAttempt> _uploadSecureDetailImage({
+    required drive.DriveApi api,
+    required String folderId,
+    required SecureDetail detail,
+    required SecureDetailImage image,
+  }) async {
+    if (image.isUploadedToDrive) {
+      return _DriveImageUploadAttempt(image: image);
+    }
+
+    try {
+      final localFile = File(image.localPath);
+      if (!await localFile.exists()) {
+        throw StateError('${image.side.label} is missing from this device.');
+      }
+
+      final extension = p.extension(image.fileName);
+      final driveName =
+          [
+            _safePathSegment(detail.type.value),
+            detail.id,
+            image.side.value,
+          ].join('_') +
+          extension;
+      final created = await api.files.create(
+        drive.File()
+          ..name = driveName
+          ..mimeType = image.mimeType
+          ..parents = <String>[folderId]
+          ..appProperties = <String, String>{
+            'digitalWalletDetailId': detail.id,
+            'digitalWalletImageSide': image.side.value,
+          },
+        uploadMedia: commons.Media(
+          localFile.openRead(),
+          await localFile.length(),
+          contentType: image.mimeType,
+        ),
+        $fields: 'id,name,webViewLink',
+      );
+
+      final fileId = created.id;
+      if (fileId == null || fileId.isEmpty) {
+        throw StateError(
+          'Google Drive did not return an ID for ${image.side.label}.',
+        );
+      }
+      return _DriveImageUploadAttempt(
+        image: image.copyWith(
+          localPath: '',
+          driveFileId: fileId,
+          driveWebViewLink: created.webViewLink,
+        ),
+      );
+    } catch (error) {
+      if (AuthService.isInsufficientScope(error)) rethrow;
+      return _DriveImageUploadAttempt(
+        image: image,
+        error: '${image.side.label}: $error',
+      );
+    }
+  }
+
+  Future<Uint8List> downloadSecureDetailImage(String fileId) {
+    return _downloadSecureDetailImage(fileId, allowAuthorizationRetry: true);
+  }
+
+  Future<Uint8List> _downloadSecureDetailImage(
+    String fileId, {
+    required bool allowAuthorizationRetry,
+  }) async {
+    final client = await _authService.authClient();
+    try {
+      final api = drive.DriveApi(client);
+      final media =
+          await api.files.get(
+                fileId,
+                downloadOptions: commons.DownloadOptions.fullMedia,
+              )
+              as commons.Media;
+      final bytes = BytesBuilder(copy: false);
+      await for (final chunk in media.stream) {
+        bytes.add(chunk);
+      }
+      return bytes.takeBytes();
+    } catch (error) {
+      if (allowAuthorizationRetry && AuthService.isInsufficientScope(error)) {
+        await _authService.reauthorize();
+        return _downloadSecureDetailImage(
+          fileId,
+          allowAuthorizationRetry: false,
+        );
+      }
+      throw StateError(
+        AuthService.friendlyGoogleError(error, service: 'Google Drive image'),
+      );
     } finally {
       client.close();
     }
@@ -180,6 +346,57 @@ class DriveService {
     return items;
   }
 
+  Future<DriveFolder> _findOrCreateImageFolder(
+    drive.DriveApi api,
+    DriveFolderConfig config,
+  ) async {
+    final cacheKey = _imageFolderCacheKey(config);
+    final cachedFolderId = _cachedImageFolderKey == cacheKey
+        ? _cachedImageFolderId
+        : null;
+    if (cachedFolderId != null) {
+      return DriveFolder(id: cachedFolderId, name: config.imageFolderName);
+    }
+
+    final response = await api.files.list(
+      q: [
+        'trashed = false',
+        "mimeType = 'application/vnd.google-apps.folder'",
+        "name = ${_queryLiteral(config.imageFolderName)}",
+        "${_queryLiteral(config.parentId)} in parents",
+      ].join(' and '),
+      orderBy: 'modifiedTime desc',
+      pageSize: 1,
+      spaces: 'drive',
+      $fields: 'files(id,name)',
+    );
+    final existing = response.files
+        ?.where((file) => file.id?.isNotEmpty == true)
+        .firstOrNull;
+    if (existing != null) {
+      final folder = DriveFolder.fromDriveFile(existing);
+      _cacheImageFolder(cacheKey, folder.id);
+      return folder;
+    }
+
+    final created = await api.files.create(
+      drive.File()
+        ..name = config.imageFolderName
+        ..mimeType = 'application/vnd.google-apps.folder'
+        ..parents = <String>[config.parentId]
+        ..appProperties = const <String, String>{
+          'digitalWalletFolder': 'secure-detail-images',
+        },
+      $fields: 'id,name',
+    );
+    if (created.id == null || created.id!.isEmpty) {
+      throw StateError('Google Drive did not return the image folder ID.');
+    }
+    final folder = DriveFolder.fromDriveFile(created);
+    _cacheImageFolder(cacheKey, folder.id);
+    return folder;
+  }
+
   Future<void> _collectFiles(
     drive.DriveApi api, {
     required String folderId,
@@ -249,4 +466,30 @@ class DriveService {
     final escaped = value.replaceAll(r'\', r'\\').replaceAll("'", r"\'");
     return "'$escaped'";
   }
+
+  String _imageFolderCacheKey(DriveFolderConfig config) {
+    final account = _authService.currentUser?.id ?? 'default';
+    return '$account::${config.parentId}::${config.imageFolderName}';
+  }
+
+  void _cacheImageFolder(String cacheKey, String folderId) {
+    _cachedImageFolderKey = cacheKey;
+    _cachedImageFolderId = folderId;
+  }
+}
+
+class DriveImageUploadResult {
+  const DriveImageUploadResult({required this.images, this.error});
+
+  final List<SecureDetailImage> images;
+  final String? error;
+
+  bool get isSuccessful => error == null;
+}
+
+class _DriveImageUploadAttempt {
+  const _DriveImageUploadAttempt({required this.image, this.error});
+
+  final SecureDetailImage image;
+  final String? error;
 }

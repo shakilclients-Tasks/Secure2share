@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 // shakils projects this
 import '../main.dart';
+import '../services/auth_service.dart';
 import '../widgets/app_logo.dart';
+import 'country_setup_screen.dart';
 import 'home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -25,12 +27,21 @@ class _LoginScreenState extends State<LoginScreen> {
       final dependencies = Drive2ShareScope.of(context);
       await dependencies.authService.signIn();
       await dependencies.googleSheetsService.syncSavedSecureDetails();
+      final isSetupComplete = await dependencies.userProfileStore
+          .isCountrySetupComplete();
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(builder: (_) => const HomeScreen()),
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              isSetupComplete ? const HomeScreen() : const CountrySetupScreen(),
+        ),
       );
     } catch (error) {
-      setState(() => _error = 'Sign-in failed: $error');
+      setState(
+        () => _error = AuthService.isInsufficientScope(error)
+            ? 'Google permission is missing. Sign in again and approve Drive access.'
+            : 'Sign-in failed: ${AuthService.friendlyGoogleError(error, service: 'Google')}',
+      );
     } finally {
       if (mounted) setState(() => _isBusy = false);
     }

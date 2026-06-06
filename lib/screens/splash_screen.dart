@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../main.dart';
 import '../widgets/app_logo.dart';
+import 'country_setup_screen.dart';
 import 'home_screen.dart';
+import 'intro_screen.dart';
 import 'login_screen.dart';
 
+// shakils projects this
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -24,6 +27,14 @@ class _SplashScreenState extends State<SplashScreen> {
     if (!mounted) return;
 
     final dependencies = Drive2ShareScope.of(context);
+    if (!await dependencies.userProfileStore.isIntroComplete()) {
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(builder: (_) => const IntroScreen()),
+      );
+      return;
+    }
+
     Widget nextScreen = const LoginScreen();
     if (dependencies.authService.isSignedIn) {
       try {
@@ -31,7 +42,11 @@ class _SplashScreenState extends State<SplashScreen> {
       } catch (_) {
         // Sheets sync can fail while offline; local details still remain usable.
       }
-      nextScreen = const HomeScreen();
+      final isSetupComplete = await dependencies.userProfileStore
+          .isCountrySetupComplete();
+      nextScreen = isSetupComplete
+          ? const HomeScreen()
+          : const CountrySetupScreen();
     }
 
     if (!mounted) return;

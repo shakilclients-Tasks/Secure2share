@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../main.dart';
 import '../models/secure_detail.dart';
-import '../widgets/file_tile.dart';
+import '../services/auth_service.dart';
+import '../services/theme_controller.dart';
+import 'country_setup_screen.dart';
 import 'recent_files_screen.dart';
-import 'secure_detail_details_screen.dart';
-import 'secure_details_form_screen.dart';
+import 'secure_detail_category_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,152 +16,72 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  late Future<List<SecureDetail>> _recentDetails;
-
-  @override
-  void initState() {
-    super.initState();
-    _recentDetails = _loadRecentDetails();
-  }
-
-  Future<List<SecureDetail>> _loadRecentDetails() {
-    return Drive2ShareScope.of(context).recentFileStore.listSecureDetails();
-  }
-
-  void _refreshRecentDetails() {
-    setState(() => _recentDetails = _loadRecentDetails());
-  }
-
   Future<void> _openMyFiles() async {
     await Navigator.of(
       context,
     ).push(MaterialPageRoute<void>(builder: (_) => const RecentFilesScreen()));
-    if (mounted) _refreshRecentDetails();
   }
 
-  Future<void> _openSecureDetailsCreator() async {
-    final detail = await openSecureDetailsCreator(context);
-    if (!mounted || detail == null) return;
-    _refreshRecentDetails();
+  Future<void> _openCategory(SecureDetailType type) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => SecureDetailDetailsScreen(detail: detail),
+        builder: (_) => SecureDetailCategoryScreen(type: type),
       ),
     );
-    if (mounted) _refreshRecentDetails();
   }
 
   @override
   Widget build(BuildContext context) {
     final dependencies = Drive2ShareScope.of(context);
     final config = dependencies.config.home;
-    final colorScheme = Theme.of(context).colorScheme;
     final greeting = _homeGreeting(dependencies);
 
     return Scaffold(
+      drawer: const _HomeMenuDrawer(),
       appBar: AppBar(title: Text(dependencies.config.appName)),
-      floatingActionButton: FloatingActionButton(
-        shape: const CircleBorder(),
-        tooltip: 'Add secure details',
-        onPressed: _openSecureDetailsCreator,
-        child: const Icon(Icons.add),
-      ),
       body: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: () async => _refreshRecentDetails(),
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 10, 20, 96),
-            children: <Widget>[
-              Text(
-                greeting,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0,
-                ),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 96),
+          children: <Widget>[
+            Text(
+              greeting,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0,
               ),
-              const SizedBox(height: 22),
-              _PrimaryActionPanel(onCreate: _openSecureDetailsCreator),
-              const SizedBox(height: 18),
-              _DashboardButton(
-                icon: Icons.history_outlined,
-                label: config.actions['recent']?.text ?? 'Recent',
-                onPressed: _openMyFiles,
-              ),
-              const SizedBox(height: 18),
-              FutureBuilder<List<SecureDetail>>(
-                future: _recentDetails,
-                builder: (context, snapshot) {
-                  return _SecurityHealthPanel(
-                    details: snapshot.data ?? <SecureDetail>[],
-                    isLoading: snapshot.connectionState != ConnectionState.done,
-                  );
-                },
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      config.recentSectionTitle,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
+            ),
+            const SizedBox(height: 22),
+            FutureBuilder<List<SecureDetailType>>(
+              future: dependencies.userProfileStore.selectedTypes(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final types = snapshot.data ?? const <SecureDetailType>[];
+                if (types.isEmpty) {
+                  return _SetupMissingPanel(
+                    onSetup: () => Navigator.of(context).pushReplacement(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const CountrySetupScreen(),
                       ),
                     ),
-                  ),
-                  TextButton(
-                    onPressed: _openMyFiles,
-                    child: Text(config.viewAllText),
-                  ),
-                ],
-              ),
-              FutureBuilder<List<SecureDetail>>(
-                future: _recentDetails,
-                builder: (context, snapshot) {
-                  final details = snapshot.data ?? <SecureDetail>[];
-                  if (snapshot.connectionState != ConnectionState.done) {
-                    return const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(child: CircularProgressIndicator()),
-                    );
-                  }
-                  final recentDetails = details.take(4).toList();
-                  if (recentDetails.isEmpty) {
-                    return Container(
-                      padding: const EdgeInsets.all(22),
-                      decoration: BoxDecoration(
-                        color: colorScheme.surfaceContainerHigh,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: colorScheme.outlineVariant),
-                      ),
-                      child: Text(
-                        config.emptyRecentText,
-                        textAlign: TextAlign.center,
-                      ),
-                    );
-                  }
-                  return Column(
-                    children: recentDetails
-                        .map(
-                          (detail) => SecureDetailTile(
-                            detail: detail,
-                            onOpen: () => Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) =>
-                                    SecureDetailDetailsScreen(detail: detail),
-                              ),
-                            ),
-                            onShare: () => _share(detail),
-                            onDelete: () => _deleteSecureDetail(detail),
-                          ),
-                        )
-                        .toList(),
                   );
-                },
-              ),
-            ],
-          ),
+                }
+                return _SecureCategoryPanel(
+                  types: types,
+                  onOpenCategory: _openCategory,
+                );
+              },
+            ),
+            const SizedBox(height: 18),
+            _DashboardButton(
+              icon: Icons.history_outlined,
+              label: config.actions['recent']?.text ?? 'Recent',
+              onPressed: _openMyFiles,
+            ),
+          ],
         ),
       ),
     );
@@ -177,56 +98,318 @@ class _HomeScreenState extends State<HomeScreen> {
         : 'User';
     return 'Hi $accountName';
   }
+}
 
-  Future<void> _share(SecureDetail detail) async {
-    try {
-      await Drive2ShareScope.of(
-        context,
-      ).fileImportService.shareSecureDetail(detail);
-    } catch (error) {
-      _showSnack(error.toString());
-    }
-  }
+class _HomeMenuDrawer extends StatelessWidget {
+  const _HomeMenuDrawer();
 
-  Future<void> _deleteSecureDetail(SecureDetail detail) async {
-    final shouldDelete = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Delete details?'),
-          content: Text('Delete "${detail.title}" from this app?'),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
+  @override
+  Widget build(BuildContext context) {
+    final dependencies = Drive2ShareScope.of(context);
+
+    return Drawer(
+      child: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor: Theme.of(
+                    context,
+                  ).colorScheme.primaryContainer,
+                  foregroundColor: Theme.of(
+                    context,
+                  ).colorScheme.onPrimaryContainer,
+                  child: const Icon(Icons.shield_outlined),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    dependencies.config.appName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            FilledButton.icon(
-              onPressed: () => Navigator.of(context).pop(true),
-              icon: const Icon(Icons.delete_outline),
-              label: const Text('Delete'),
+            const SizedBox(height: 18),
+            _DrawerMenuTile(
+              icon: Icons.health_and_safety_outlined,
+              title: 'Secure health',
+              onTap: () =>
+                  _openMenuPage(context, const _SecureHealthMenuScreen()),
+            ),
+            _DrawerMenuTile(
+              icon: Icons.account_circle_outlined,
+              title: 'User status',
+              onTap: () =>
+                  _openMenuPage(context, const _UserStatusMenuScreen()),
+            ),
+            _DrawerMenuTile(
+              icon: Icons.contrast_outlined,
+              title: 'Theme',
+              onTap: () => _openMenuPage(context, const _ThemeMenuScreen()),
+            ),
+            _DrawerMenuTile(
+              icon: Icons.info_outline,
+              title: 'App about',
+              onTap: () => _openMenuPage(context, const _AboutMenuScreen()),
+            ),
+            _DrawerMenuTile(
+              icon: Icons.support_agent_outlined,
+              title: 'Support',
+              onTap: () => _openMenuPage(context, const _SupportMenuScreen()),
             ),
           ],
-        );
-      },
+        ),
+      ),
     );
-    if (shouldDelete != true || !mounted) return;
-
-    try {
-      await Drive2ShareScope.of(
-        context,
-      ).recentFileStore.deleteSecureDetail(detail.id);
-      _refreshRecentDetails();
-      _showSnack('Deleted "${detail.title}".');
-    } catch (error) {
-      _showSnack('Unable to delete: $error');
-    }
   }
 
-  void _showSnack(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+  void _openMenuPage(BuildContext context, Widget page) {
+    final navigator = Navigator.of(context);
+    navigator.pop();
+    navigator.push(MaterialPageRoute<void>(builder: (_) => page));
+  }
+}
+
+class _DrawerMenuTile extends StatelessWidget {
+  const _DrawerMenuTile({
+    required this.icon,
+    required this.title,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 6),
+      leading: Icon(icon),
+      title: Text(title),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: onTap,
+    );
+  }
+}
+
+class _SecureHealthMenuScreen extends StatefulWidget {
+  const _SecureHealthMenuScreen();
+
+  @override
+  State<_SecureHealthMenuScreen> createState() =>
+      _SecureHealthMenuScreenState();
+}
+
+class _SecureHealthMenuScreenState extends State<_SecureHealthMenuScreen> {
+  Future<List<SecureDetail>>? _detailsFuture;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _detailsFuture ??= _loadDetails();
+  }
+
+  Future<List<SecureDetail>> _loadDetails() {
+    return Drive2ShareScope.of(context).recentFileStore.listSecureDetails();
+  }
+
+  Future<void> _refresh() async {
+    setState(() => _detailsFuture = _loadDetails());
+    await _detailsFuture;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Secure health')),
+      body: SafeArea(
+        child: RefreshIndicator(
+          onRefresh: _refresh,
+          child: ListView(
+            padding: const EdgeInsets.all(20),
+            children: <Widget>[
+              FutureBuilder<List<SecureDetail>>(
+                future: _detailsFuture,
+                builder: (context, snapshot) {
+                  return _SecurityHealthPanel(
+                    details: snapshot.data ?? <SecureDetail>[],
+                    isLoading: snapshot.connectionState != ConnectionState.done,
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UserStatusMenuScreen extends StatelessWidget {
+  const _UserStatusMenuScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final user = Drive2ShareScope.of(context).authService.currentUser;
+    final name = user?.displayName?.trim();
+    final email = user?.email.trim();
+    final displayName = name != null && name.isNotEmpty
+        ? name
+        : email != null && email.isNotEmpty
+        ? email
+        : 'Not signed in';
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('User status')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: <Widget>[
+            _MenuSection(
+              icon: Icons.account_circle_outlined,
+              title: 'User status',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    displayName,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if (email != null && email.isNotEmpty && email != displayName)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        email,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  const SizedBox(height: 10),
+                  _StatusPill(
+                    icon: user == null
+                        ? Icons.error_outline
+                        : Icons.verified_user_outlined,
+                    label: user == null ? 'Google login needed' : 'Signed in',
+                  ),
+                  const SizedBox(height: 14),
+                  FilledButton.icon(
+                    onPressed: () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      try {
+                        await Drive2ShareScope.of(
+                          context,
+                        ).authService.reauthorize();
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Google Sheets and Drive access connected.',
+                            ),
+                          ),
+                        );
+                      } catch (error) {
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              AuthService.friendlyGoogleError(
+                                error,
+                                service: 'Google',
+                              ),
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.sync_lock_outlined),
+                    label: const Text('Reconnect Google access'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ThemeMenuScreen extends StatelessWidget {
+  const _ThemeMenuScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Theme')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: <Widget>[
+            _ThemeMenuSection(
+              controller: Drive2ShareScope.of(context).themeController,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AboutMenuScreen extends StatelessWidget {
+  const _AboutMenuScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final appName = Drive2ShareScope.of(context).config.appName;
+    return Scaffold(
+      appBar: AppBar(title: const Text('App about')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: <Widget>[
+            _MenuSection(
+              icon: Icons.info_outline,
+              title: appName,
+              child: const Text('Version 1.0.0+1'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SupportMenuScreen extends StatelessWidget {
+  const _SupportMenuScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Support')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: const <Widget>[
+            _MenuSection(
+              icon: Icons.support_agent_outlined,
+              title: 'Support',
+              child: Text('Login, Google Sheets sync, and sharing support.'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -354,10 +537,131 @@ class _HealthPill extends StatelessWidget {
   }
 }
 
-class _PrimaryActionPanel extends StatelessWidget {
-  const _PrimaryActionPanel({required this.onCreate});
+class _MenuSection extends StatelessWidget {
+  const _MenuSection({
+    required this.icon,
+    required this.title,
+    required this.child,
+  });
 
-  final VoidCallback onCreate;
+  final IconData icon;
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(icon, color: colorScheme.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: colorScheme.primaryContainer.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 18, color: colorScheme.primary),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThemeMenuSection extends StatelessWidget {
+  const _ThemeMenuSection({required this.controller});
+
+  final AppThemeController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return _MenuSection(
+      icon: Icons.contrast_outlined,
+      title: 'Theme',
+      child: AnimatedBuilder(
+        animation: controller,
+        builder: (context, _) {
+          return SegmentedButton<ThemeMode>(
+            showSelectedIcon: false,
+            selected: <ThemeMode>{controller.themeMode},
+            onSelectionChanged: (selection) {
+              controller.setThemeMode(selection.single);
+            },
+            segments: const <ButtonSegment<ThemeMode>>[
+              ButtonSegment<ThemeMode>(
+                value: ThemeMode.system,
+                icon: Icon(Icons.settings_suggest_outlined),
+                label: Text('System'),
+              ),
+              ButtonSegment<ThemeMode>(
+                value: ThemeMode.dark,
+                icon: Icon(Icons.dark_mode_outlined),
+                label: Text('Dark'),
+              ),
+              ButtonSegment<ThemeMode>(
+                value: ThemeMode.light,
+                icon: Icon(Icons.light_mode_outlined),
+                label: Text('White'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _SetupMissingPanel extends StatelessWidget {
+  const _SetupMissingPanel({required this.onSetup});
+
+  final VoidCallback onSetup;
 
   @override
   Widget build(BuildContext context) {
@@ -365,36 +669,150 @@ class _PrimaryActionPanel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHigh,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: colorScheme.outlineVariant),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          CircleAvatar(
-            radius: 28,
-            backgroundColor: colorScheme.primaryContainer,
-            foregroundColor: colorScheme.onPrimaryContainer,
-            child: const Icon(Icons.lock_outline),
+          Text(
+            'Choose your country setup',
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Text(
-              'Secure details',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-            ),
-          ),
-          const SizedBox(width: 12),
-          IconButton.filled(
-            tooltip: 'Add',
-            onPressed: onCreate,
-            icon: const Icon(Icons.add),
+          const SizedBox(height: 8),
+          const Text('Select country and secure sections to customize home.'),
+          const SizedBox(height: 14),
+          FilledButton.icon(
+            onPressed: onSetup,
+            icon: const Icon(Icons.public_outlined),
+            label: const Text('Start setup'),
           ),
         ],
       ),
     );
+  }
+}
+
+class _SecureCategoryPanel extends StatelessWidget {
+  const _SecureCategoryPanel({
+    required this.types,
+    required this.onOpenCategory,
+  });
+
+  final List<SecureDetailType> types;
+  final ValueChanged<SecureDetailType> onOpenCategory;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          'Secure details',
+          style: Theme.of(
+            context,
+          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final columns = constraints.maxWidth >= 520 ? 4 : 3;
+            return GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: types.length,
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: columns,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 0.86,
+              ),
+              itemBuilder: (context, index) {
+                final type = types[index];
+                return _SecureCategoryButton(
+                  type: type,
+                  onTap: () => onOpenCategory(type),
+                );
+              },
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _SecureCategoryButton extends StatelessWidget {
+  const _SecureCategoryButton({required this.type, required this.onTap});
+
+  final SecureDetailType type;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Tooltip(
+      message: type.title,
+      child: Material(
+        color: colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                CircleAvatar(
+                  radius: 26,
+                  backgroundColor: colorScheme.primaryContainer,
+                  foregroundColor: colorScheme.onPrimaryContainer,
+                  child: Icon(_iconFor(type)),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  type.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    height: 1.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _iconFor(SecureDetailType type) {
+    return switch (type) {
+      SecureDetailType.bank => Icons.account_balance_outlined,
+      SecureDetailType.aadhaar => Icons.badge_outlined,
+      SecureDetailType.pan => Icons.assignment_ind_outlined,
+      SecureDetailType.passport => Icons.flight_takeoff_outlined,
+      SecureDetailType.drivingLicense => Icons.directions_car_outlined,
+      SecureDetailType.voterId => Icons.how_to_vote_outlined,
+      SecureDetailType.upi => Icons.currency_rupee_outlined,
+      SecureDetailType.login => Icons.key_outlined,
+      SecureDetailType.password => Icons.password_outlined,
+      SecureDetailType.nationalId => Icons.badge_outlined,
+      SecureDetailType.taxId => Icons.receipt_long_outlined,
+      SecureDetailType.socialSecurity => Icons.security_outlined,
+      SecureDetailType.healthInsurance => Icons.medical_information_outlined,
+      SecureDetailType.residencePermit => Icons.assignment_outlined,
+      SecureDetailType.debitCard => Icons.account_balance_wallet_outlined,
+      SecureDetailType.creditCard => Icons.credit_card_outlined,
+      SecureDetailType.address => Icons.location_on_outlined,
+    };
   }
 }
 

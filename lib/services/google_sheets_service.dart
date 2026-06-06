@@ -16,8 +16,11 @@ class GoogleSheetsService {
   });
 
   static const String _storedSpreadsheetIdPrefix = 'googleSheetsSpreadsheetId';
-  static const String _syncedDetailIdsPrefix = 'googleSheetsSyncedDetailIds';
-  static const List<String> _headers = <String>[
+  static const String _syncedDetailIdsPrefix =
+      'googleSheetsTableSyncedDetailIds';
+  static const String _combinedCategoryHeader = 'Category';
+  static const List<String> _keyValueHeaders = <String>['Key', 'Value'];
+  static const List<String> _legacyHeaders = <String>[
     'Saved At',
     'Detail ID',
     'Type',
@@ -31,8 +34,18 @@ class GoogleSheetsService {
   final GoogleSheetsConfig config;
   final AuthService authService;
   final RecentFileStore recentFileStore;
+  final Map<String, Set<String>> _knownSheets = <String, Set<String>>{};
+  final Map<String, List<String>> _headersBySheet = <String, List<String>>{};
+  String? _cachedSpreadsheetId;
+  String? _cachedSpreadsheetAccountKey;
 
   Future<GoogleSheetsSyncResult> syncSavedSecureDetails() async {
+    return _syncSavedSecureDetails(allowAuthorizationRetry: true);
+  }
+
+  Future<GoogleSheetsSyncResult> _syncSavedSecureDetails({
+    required bool allowAuthorizationRetry,
+  }) async {
     if (!config.enabled) return const GoogleSheetsSyncResult.disabled();
 
     if (!authService.isSignedIn) {
@@ -45,9 +58,10 @@ class GoogleSheetsService {
     final client = await authService.authClient();
     try {
       final api = sheets.SheetsApi(client);
-      final spreadsheetId = await _spreadsheetId(api);
-      await _ensureSheetExists(api, spreadsheetId);
-      await _ensureHeaderRow(api, spreadsheetId);
+      final spreadsheetId = await _spreadsheetId(
+        api,
+        initialSheetName: worksheetNameFor(details.first),
+      );
 
       final syncedIds = await _syncedDetailIds(spreadsheetId);
       var syncedCount = 0;
@@ -71,15 +85,32 @@ class GoogleSheetsService {
         skippedCount: skippedCount,
       );
     } on commons.DetailedApiRequestError catch (error) {
+      if (allowAuthorizationRetry && AuthService.isInsufficientScope(error)) {
+        await authService.reauthorize();
+        return _syncSavedSecureDetails(allowAuthorizationRetry: false);
+      }
       throw StateError(_sheetsSetupMessage(error));
     } on commons.ApiRequestError catch (error) {
-      throw StateError(error.message ?? 'Google Sheets sync failed.');
+      if (allowAuthorizationRetry && AuthService.isInsufficientScope(error)) {
+        await authService.reauthorize();
+        return _syncSavedSecureDetails(allowAuthorizationRetry: false);
+      }
+      throw StateError(
+        AuthService.friendlyGoogleError(error, service: 'Google Sheets'),
+      );
     } finally {
       client.close();
     }
   }
 
   Future<void> appendSecureDetail(SecureDetail detail) async {
+    return _appendSecureDetail(detail, allowAuthorizationRetry: true);
+  }
+
+  Future<void> _appendSecureDetail(
+    SecureDetail detail, {
+    required bool allowAuthorizationRetry,
+  }) async {
     if (!config.enabled) return;
 
     if (!authService.isSignedIn) {
@@ -89,9 +120,11 @@ class GoogleSheetsService {
     final client = await authService.authClient();
     try {
       final api = sheets.SheetsApi(client);
-      final spreadsheetId = await _spreadsheetId(api);
-      await _ensureSheetExists(api, spreadsheetId);
-      await _ensureHeaderRow(api, spreadsheetId);
+      final sheetName = worksheetNameFor(detail);
+      final spreadsheetId = await _spreadsheetId(
+        api,
+        initialSheetName: sheetName,
+      );
 
       final syncedIds = await _syncedDetailIds(spreadsheetId);
       if (syncedIds.contains(detail.id)) return;
@@ -100,20 +133,45 @@ class GoogleSheetsService {
       syncedIds.add(detail.id);
       await _saveSyncedDetailIds(spreadsheetId, syncedIds);
     } on commons.DetailedApiRequestError catch (error) {
+      if (allowAuthorizationRetry && AuthService.isInsufficientScope(error)) {
+        await authService.reauthorize();
+        return _appendSecureDetail(detail, allowAuthorizationRetry: false);
+      }
       throw StateError(_sheetsSetupMessage(error));
     } on commons.ApiRequestError catch (error) {
-      throw StateError(error.message ?? 'Google Sheets sync failed.');
+      if (allowAuthorizationRetry && AuthService.isInsufficientScope(error)) {
+        await authService.reauthorize();
+        return _appendSecureDetail(detail, allowAuthorizationRetry: false);
+      }
+      throw StateError(
+        AuthService.friendlyGoogleError(error, service: 'Google Sheets'),
+      );
     } finally {
       client.close();
     }
   }
 
-  Future<String> _spreadsheetId(sheets.SheetsApi api) async {
+  Future<String> _spreadsheetId(
+    sheets.SheetsApi api, {
+    required String initialSheetName,
+  }) async {
+    final accountKey = _accountKey();
+    if (_cachedSpreadsheetAccountKey == accountKey &&
+        _cachedSpreadsheetId != null) {
+      return _cachedSpreadsheetId!;
+    }
+
     final configuredId = _cleanSpreadsheetId(config.spreadsheetId);
-    if (configuredId.isNotEmpty) return configuredId;
+    if (configuredId.isNotEmpty) {
+      _cacheSpreadsheetId(accountKey, configuredId);
+      return configuredId;
+    }
 
     final storedId = await recentFileStore.getSetting(_storedSpreadsheetIdKey);
-    if (storedId != null && storedId.trim().isNotEmpty) return storedId;
+    if (storedId != null && storedId.trim().isNotEmpty) {
+      _cacheSpreadsheetId(accountKey, storedId);
+      return storedId;
+    }
 
     final spreadsheet = await api.spreadsheets.create(
       sheets.Spreadsheet(
@@ -122,7 +180,7 @@ class GoogleSheetsService {
         ),
         sheets: <sheets.Sheet>[
           sheets.Sheet(
-            properties: sheets.SheetProperties(title: config.sheetName),
+            properties: sheets.SheetProperties(title: initialSheetName),
           ),
         ],
       ),
@@ -135,6 +193,8 @@ class GoogleSheetsService {
     }
 
     await recentFileStore.setSetting(_storedSpreadsheetIdKey, createdId);
+    _cacheSpreadsheetId(accountKey, createdId);
+    _knownSheets[createdId] = <String>{initialSheetName};
     return createdId;
   }
 
@@ -142,11 +202,19 @@ class GoogleSheetsService {
     sheets.SheetsApi api,
     String spreadsheetId,
     SecureDetail detail,
-  ) {
-    return api.spreadsheets.values.append(
-      sheets.ValueRange(values: <List<Object?>>[_rowFor(detail)]),
+  ) async {
+    final sheetName = worksheetNameFor(detail);
+    await _ensureSheetExists(api, spreadsheetId, sheetName);
+    final headers = await _ensureHeadersForDetail(
+      api,
       spreadsheetId,
-      _range('A1'),
+      sheetName,
+      detail,
+    );
+    await api.spreadsheets.values.append(
+      sheets.ValueRange(values: <List<Object?>>[rowForDetail(detail, headers)]),
+      spreadsheetId,
+      _range(sheetName, 'A1'),
       insertDataOption: 'INSERT_ROWS',
       valueInputOption: 'USER_ENTERED',
     );
@@ -155,16 +223,23 @@ class GoogleSheetsService {
   Future<void> _ensureSheetExists(
     sheets.SheetsApi api,
     String spreadsheetId,
+    String sheetName,
   ) async {
+    final known = _knownSheets[spreadsheetId];
+    if (known?.contains(sheetName) == true) return;
+
     final spreadsheet = await api.spreadsheets.get(
       spreadsheetId,
       $fields: 'sheets.properties.title',
     );
-    final exists =
-        spreadsheet.sheets?.any(
-          (sheet) => sheet.properties?.title == config.sheetName,
-        ) ??
-        false;
+    final sheetNames =
+        spreadsheet.sheets
+            ?.map((sheet) => sheet.properties?.title)
+            .whereType<String>()
+            .toSet() ??
+        <String>{};
+    _knownSheets[spreadsheetId] = sheetNames;
+    final exists = sheetNames.contains(sheetName);
     if (exists) return;
 
     await api.spreadsheets.batchUpdate(
@@ -172,53 +247,147 @@ class GoogleSheetsService {
         requests: <sheets.Request>[
           sheets.Request(
             addSheet: sheets.AddSheetRequest(
-              properties: sheets.SheetProperties(title: config.sheetName),
+              properties: sheets.SheetProperties(title: sheetName),
             ),
           ),
         ],
       ),
       spreadsheetId,
     );
+    sheetNames.add(sheetName);
   }
 
-  Future<void> _ensureHeaderRow(
+  Future<List<String>> _ensureHeadersForDetail(
     sheets.SheetsApi api,
     String spreadsheetId,
+    String sheetName,
+    SecureDetail detail,
+  ) async {
+    final cacheKey = _sheetCacheKey(spreadsheetId, sheetName);
+    var headers = List<String>.of(
+      _headersBySheet[cacheKey] ??
+          await _readHeaderRow(api, spreadsheetId, sheetName),
+    );
+
+    if (_rowStartsWith(headers, _legacyHeaders) ||
+        _rowStartsWith(headers, _keyValueHeaders) ||
+        headers.firstOrNull == _combinedCategoryHeader) {
+      await api.spreadsheets.values.clear(
+        sheets.ClearValuesRequest(),
+        spreadsheetId,
+        _range(sheetName, 'A:ZZ'),
+      );
+      headers = <String>[];
+    }
+
+    var shouldWriteHeaders = headers.isEmpty;
+
+    for (final entry in detail.fields.entries) {
+      final label = SecureDetail.labelFor(entry.key);
+      if (headers.contains(label)) continue;
+      headers.add(label);
+      shouldWriteHeaders = true;
+    }
+
+    if (shouldWriteHeaders) {
+      await _writeHeaderRow(api, spreadsheetId, sheetName, headers);
+    }
+
+    _headersBySheet[cacheKey] = List<String>.unmodifiable(headers);
+    return headers;
+  }
+
+  Future<List<String>> _readHeaderRow(
+    sheets.SheetsApi api,
+    String spreadsheetId,
+    String sheetName,
   ) async {
     final existing = await api.spreadsheets.values.get(
       spreadsheetId,
-      _range('A1:H1'),
+      _range(sheetName, 'A1:ZZ1'),
     );
-    if (existing.values?.isNotEmpty == true) return;
+    final firstRow = existing.values?.firstOrNull ?? const <Object?>[];
+    return firstRow
+        .map((value) => value.toString().trim())
+        .where((value) => value.isNotEmpty)
+        .toList();
+  }
 
-    await api.spreadsheets.values.update(
-      sheets.ValueRange(values: <List<Object?>>[_headers]),
+  Future<void> _writeHeaderRow(
+    sheets.SheetsApi api,
+    String spreadsheetId,
+    String sheetName,
+    List<String> headers,
+  ) {
+    return api.spreadsheets.values.update(
+      sheets.ValueRange(values: <List<Object?>>[headers]),
       spreadsheetId,
-      _range('A1:H1'),
+      _range(sheetName, 'A1:${_columnName(headers.length)}1'),
       valueInputOption: 'RAW',
     );
   }
 
-  List<Object?> _rowFor(SecureDetail detail) {
-    final labels = detail.fields.keys.map(SecureDetail.labelFor).join('\n');
-    final values = detail.fields.values.join('\n');
-    return <Object?>[
-      DateTime.fromMillisecondsSinceEpoch(
-        detail.createdAtMillis,
-      ).toIso8601String(),
-      detail.id,
-      detail.type.value,
-      detail.title,
-      detail.fields['name'] ?? detail.fields['fullName'] ?? '',
-      labels,
-      values,
-      jsonEncode(detail.fields),
-    ];
+  static List<Object?> rowForDetail(SecureDetail detail, List<String> headers) {
+    final row = List<Object?>.filled(headers.length, '');
+
+    for (final entry in detail.fields.entries) {
+      final columnIndex = headers.indexOf(SecureDetail.labelFor(entry.key));
+      if (columnIndex == -1) continue;
+      row[columnIndex] = entry.value;
+    }
+
+    return row;
   }
 
-  String _range(String cellRange) {
-    final escapedSheetName = config.sheetName.replaceAll("'", "''");
+  static String worksheetNameFor(SecureDetail detail) {
+    const suffix = ' Details';
+    final title = detail.title.trim();
+    final category = title.endsWith(suffix)
+        ? title.substring(0, title.length - suffix.length)
+        : title;
+    final sanitized = category
+        .replaceAll(RegExp(r"[\[\]:*?/\\]"), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (sanitized.isEmpty) return 'Secure Detail';
+    return sanitized.length <= 100 ? sanitized : sanitized.substring(0, 100);
+  }
+
+  bool _rowStartsWith(List<Object?> row, List<String> expected) {
+    if (row.length < expected.length) return false;
+    for (var index = 0; index < expected.length; index++) {
+      if (row[index].toString().trim() != expected[index]) return false;
+    }
+    return true;
+  }
+
+  String _range(String sheetName, String cellRange) {
+    final escapedSheetName = sheetName.replaceAll("'", "''");
     return "'$escapedSheetName'!$cellRange";
+  }
+
+  String _columnName(int index) {
+    var number = index;
+    var name = '';
+    while (number > 0) {
+      number--;
+      name = String.fromCharCode(65 + (number % 26)) + name;
+      number ~/= 26;
+    }
+    return name;
+  }
+
+  void _cacheSpreadsheetId(String accountKey, String spreadsheetId) {
+    if (_cachedSpreadsheetAccountKey != accountKey) {
+      _knownSheets.clear();
+      _headersBySheet.clear();
+    }
+    _cachedSpreadsheetAccountKey = accountKey;
+    _cachedSpreadsheetId = spreadsheetId;
+  }
+
+  String _sheetCacheKey(String spreadsheetId, String sheetName) {
+    return '$spreadsheetId::$sheetName';
   }
 
   Future<Set<String>> _syncedDetailIds(String spreadsheetId) async {
@@ -259,9 +428,12 @@ class GoogleSheetsService {
 
   String _sheetsSetupMessage(commons.DetailedApiRequestError error) {
     final message = error.message ?? '';
+    if (AuthService.isInsufficientScope(error)) {
+      return 'Google permission is missing. Reconnect Google and approve Drive access.';
+    }
     if (error.status == 403 &&
         message.contains('Google Sheets API has not been used')) {
-      return 'Google Sheets API is disabled for project to-share-37301. Open Google Cloud Console > APIs & Services > Library > Google Sheets API > Enable, wait 2-5 minutes, then try again.';
+      return 'Google Sheets API is disabled in the OAuth project. Enable it in Google Cloud Console, wait a few minutes, and try again.';
     }
     if (error.status == 403) {
       return 'Google Sheets permission denied. Enable Google Sheets API, add your Gmail as an OAuth test user, and allow Sheets permission during Google login.';

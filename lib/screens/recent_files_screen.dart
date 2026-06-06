@@ -4,7 +4,6 @@ import '../main.dart';
 import '../models/secure_detail.dart';
 import '../widgets/file_tile.dart';
 import 'secure_detail_details_screen.dart';
-import 'secure_details_form_screen.dart';
 
 class RecentFilesScreen extends StatefulWidget {
   const RecentFilesScreen({super.key});
@@ -15,7 +14,6 @@ class RecentFilesScreen extends StatefulWidget {
 
 class _RecentFilesScreenState extends State<RecentFilesScreen> {
   late Future<List<SecureDetail>> _detailsFuture;
-  bool _isCreating = false;
   String _query = '';
 
   @override
@@ -33,26 +31,6 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
       ).recentFileStore.listSecureDetails(),
     );
     await _detailsFuture;
-  }
-
-  Future<void> _createFile() async {
-    setState(() => _isCreating = true);
-    try {
-      final detail = await openSecureDetailsCreator(context);
-      if (!mounted || detail == null) return;
-      await _refresh();
-      if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => SecureDetailDetailsScreen(detail: detail),
-        ),
-      );
-      await _refresh();
-    } catch (error) {
-      _showSnack(error.toString());
-    } finally {
-      if (mounted) setState(() => _isCreating = false);
-    }
   }
 
   Future<void> _share(SecureDetail detail) async {
@@ -92,9 +70,8 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
     if (shouldDelete != true || !mounted) return;
 
     try {
-      await Drive2ShareScope.of(
-        context,
-      ).recentFileStore.deleteSecureDetail(detail.id);
+      final dependencies = Drive2ShareScope.of(context);
+      await dependencies.recentFileStore.deleteSecureDetail(detail.id);
       await _refresh();
       _showSnack('Deleted "${detail.title}".');
     } catch (error) {
@@ -107,17 +84,6 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
     final config = Drive2ShareScope.of(context).config.screens;
     return Scaffold(
       appBar: AppBar(title: Text(config.recentTitle)),
-      floatingActionButton: FloatingActionButton(
-        shape: const CircleBorder(),
-        tooltip: 'Add secure details',
-        onPressed: _isCreating ? null : _createFile,
-        child: _isCreating
-            ? const SizedBox.square(
-                dimension: 22,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.add),
-      ),
       body: SafeArea(
         child: FutureBuilder<List<SecureDetail>>(
           future: _detailsFuture,

@@ -1,5 +1,81 @@
 import 'dart:convert';
 
+enum SecureDetailImageSide {
+  front('front', 'Front image'),
+  back('back', 'Back image');
+
+  const SecureDetailImageSide(this.value, this.label);
+
+  final String value;
+  final String label;
+
+  static SecureDetailImageSide fromValue(String value) {
+    return SecureDetailImageSide.values.firstWhere(
+      (side) => side.value == value,
+      orElse: () => SecureDetailImageSide.front,
+    );
+  }
+}
+
+class SecureDetailImage {
+  const SecureDetailImage({
+    required this.side,
+    required this.localPath,
+    required this.fileName,
+    required this.mimeType,
+    this.driveFileId,
+    this.driveWebViewLink,
+  });
+
+  final SecureDetailImageSide side;
+  final String localPath;
+  final String fileName;
+  final String mimeType;
+  final String? driveFileId;
+  final String? driveWebViewLink;
+
+  bool get isUploadedToDrive => driveFileId?.isNotEmpty == true;
+
+  SecureDetailImage copyWith({
+    String? localPath,
+    String? fileName,
+    String? mimeType,
+    String? driveFileId,
+    String? driveWebViewLink,
+  }) {
+    return SecureDetailImage(
+      side: side,
+      localPath: localPath ?? this.localPath,
+      fileName: fileName ?? this.fileName,
+      mimeType: mimeType ?? this.mimeType,
+      driveFileId: driveFileId ?? this.driveFileId,
+      driveWebViewLink: driveWebViewLink ?? this.driveWebViewLink,
+    );
+  }
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{
+      'side': side.value,
+      'localPath': localPath,
+      'fileName': fileName,
+      'mimeType': mimeType,
+      if (driveFileId != null) 'driveFileId': driveFileId,
+      if (driveWebViewLink != null) 'driveWebViewLink': driveWebViewLink,
+    };
+  }
+
+  factory SecureDetailImage.fromJson(Map<String, dynamic> json) {
+    return SecureDetailImage(
+      side: SecureDetailImageSide.fromValue(json['side'] as String? ?? ''),
+      localPath: json['localPath'] as String? ?? '',
+      fileName: json['fileName'] as String? ?? 'image',
+      mimeType: json['mimeType'] as String? ?? 'application/octet-stream',
+      driveFileId: json['driveFileId'] as String?,
+      driveWebViewLink: json['driveWebViewLink'] as String?,
+    );
+  }
+}
+
 enum SecureDetailType {
   bank('bank', 'Bank Details'),
   aadhaar('aadhaar', 'Aadhaar Details'),
@@ -9,6 +85,14 @@ enum SecureDetailType {
   voterId('voterId', 'Voter ID'),
   upi('upi', 'UPI Details'),
   login('login', 'Login Details'),
+  password('password', 'Passwords'),
+  nationalId('nationalId', 'National ID'),
+  taxId('taxId', 'Tax ID'),
+  socialSecurity('socialSecurity', 'Social Security'),
+  healthInsurance('healthInsurance', 'Health Insurance'),
+  residencePermit('residencePermit', 'Residence Permit'),
+  debitCard('debitCard', 'Debit Card'),
+  creditCard('creditCard', 'Credit Card'),
   address('address', 'Address Details');
 
   const SecureDetailType(this.value, this.title);
@@ -31,6 +115,7 @@ class SecureDetail {
     required this.fields,
     required this.createdAtMillis,
     required this.updatedAtMillis,
+    this.images = const <SecureDetailImage>[],
   });
 
   final String id;
@@ -38,6 +123,7 @@ class SecureDetail {
   final Map<String, String> fields;
   final int createdAtMillis;
   final int updatedAtMillis;
+  final List<SecureDetailImage> images;
 
   String get title => type.title;
 
@@ -84,7 +170,10 @@ class SecureDetail {
       'id': id,
       'type': type.value,
       'title': title,
-      'dataJson': jsonEncode(fields),
+      'dataJson': jsonEncode(<String, Object?>{
+        'fields': fields,
+        'images': images.map((image) => image.toJson()).toList(),
+      }),
       'createdAtMillis': createdAtMillis,
       'updatedAtMillis': updatedAtMillis,
     };
@@ -115,12 +204,38 @@ class SecureDetail {
   factory SecureDetail.fromMap(Map<String, Object?> map) {
     final dataJson = map['dataJson'] as String? ?? '{}';
     final decoded = jsonDecode(dataJson) as Map<String, dynamic>;
+    final nestedFields = decoded['fields'];
+    final rawFields = nestedFields is Map<String, dynamic>
+        ? nestedFields
+        : decoded;
+    final rawImages = decoded['images'];
     return SecureDetail(
       id: map['id'] as String,
       type: SecureDetailType.fromValue(map['type'] as String),
-      fields: decoded.map((key, value) => MapEntry(key, value.toString())),
+      fields: rawFields.map((key, value) => MapEntry(key, value.toString())),
       createdAtMillis: map['createdAtMillis'] as int,
       updatedAtMillis: map['updatedAtMillis'] as int,
+      images: rawImages is List<dynamic>
+          ? rawImages
+                .whereType<Map<String, dynamic>>()
+                .map(SecureDetailImage.fromJson)
+                .toList(growable: false)
+          : const <SecureDetailImage>[],
+    );
+  }
+
+  SecureDetail copyWith({
+    Map<String, String>? fields,
+    int? updatedAtMillis,
+    List<SecureDetailImage>? images,
+  }) {
+    return SecureDetail(
+      id: id,
+      type: type,
+      fields: fields ?? this.fields,
+      createdAtMillis: createdAtMillis,
+      updatedAtMillis: updatedAtMillis ?? this.updatedAtMillis,
+      images: images ?? this.images,
     );
   }
 
@@ -134,6 +249,13 @@ class SecureDetail {
     'mobileNumber',
     'password',
     'phoneNumber',
+    'cardNumber',
+    'idNumber',
+    'taxNumber',
+    'socialSecurityNumber',
+    'healthId',
+    'policyNumber',
+    'permitNumber',
   };
 
   static const Set<String> _expiryFieldKeys = <String>{
@@ -146,6 +268,14 @@ class SecureDetail {
     if (text == null || text.isEmpty) return null;
 
     final parts = text.split(RegExp(r'[-/]'));
+    if (parts.length == 2) {
+      final month = int.tryParse(parts[0]);
+      final year = int.tryParse(parts[1]);
+      if (month == null || year == null) return null;
+      if (year < 1900 || month < 1 || month > 12) return null;
+      return DateTime(year, month + 1, 0);
+    }
+
     if (parts.length != 3) return null;
 
     final first = int.tryParse(parts[0]);
@@ -191,6 +321,15 @@ class SecureDetail {
       'serviceName' => 'Service name',
       'username' => 'Username',
       'password' => 'Password',
+      'cardHolderName' => 'Cardholder name',
+      'cardNumber' => 'Card number',
+      'idNumber' => 'ID number',
+      'taxNumber' => 'Tax number',
+      'socialSecurityNumber' => 'Social Security number',
+      'healthId' => 'Health ID',
+      'policyNumber' => 'Policy number',
+      'provider' => 'Provider',
+      'permitNumber' => 'Permit number',
       'notes' => 'Notes',
       'fullName' => 'Full name',
       'phoneNumber' => 'Phone number',
